@@ -1,2 +1,2 @@
 # MoodWorld
-TRAVAILLER BIEN SURTOUT !! JE COMPTE SUR VOUS 
+# c'est la vie 

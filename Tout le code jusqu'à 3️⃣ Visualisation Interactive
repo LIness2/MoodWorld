@@ -1,0 +1,282 @@
+import requests
+
+# Clé API pour NewsAPI
+NEWSAPI_KEY = "4aa659261bd2443997ffc38ef5c851fd"
+NEWSAPI_URL = "https://newsapi.org/v2/everything"
+
+# URL de GDELT (version 2.0)
+GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+# Liste des pays et langues
+country_language_map = {
+    "fr": "fr",
+    "us": "en",
+    "gb": "en",
+    "de": "de",
+    "es": "es",
+    "it": "it",
+    "ar": "ar",
+}
+
+# Paramètres NewsAPI
+newsapi_params = {
+    "apiKey": NEWSAPI_KEY,
+    "q": "Ukraine OR Russia OR Israel OR Palestine OR Inflation OR Economy",
+    "pageSize": 5,
+    "sortBy": "publishedAt",
+    "from": "2025-03-20",
+    "to": "2025-03-25",
+}
+
+# Fonction pour récupérer les articles depuis NewsAPI
+def get_newsapi_articles(country, language):
+    params = newsapi_params.copy()
+    params["language"] = language
+    response = requests.get(NEWSAPI_URL, params=params)
+
+    print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
+    if response.status_code == 200:
+        data = response.json()
+        if data.get("articles"):
+            for article in data["articles"]:
+                print(f"📌 {article['title']} ({article['source']['name']})")
+                print(f"🔗 {article['url']}\n")
+        else:
+            print("❌ Aucun article trouvé.")
+    else:
+        print(f"❌ Erreur {response.status_code}: {response.text}")
+
+# Fonction pour récupérer les articles depuis GDELT
+def get_gdelt_articles():
+    params = {
+        "query": "Ukraine OR Russia OR Israel OR Palestine OR Inflation OR Economy",
+        "mode": "ArtList",
+        "maxrecords": 10,  # Augmenté pour plus d'articles
+        "format": "json",
+        "sort": "date",  # Trier par date
+    }
+    response = requests.get(GDELT_URL, params=params)
+
+    print("\n🌍 GDELT - Articles d'actualité mondiale")
+    if response.status_code == 200:
+        data = response.json()
+        if "articles" in data:
+            for article in data["articles"]:
+                print(f"📌 {article.get('title', 'Sans titre')} ({article.get('source', 'Inconnu')})")
+                print(f"🔗 {article.get('url', 'Pas de lien')}\n")
+        else:
+            print("❌ Aucun article trouvé.")
+    else:
+        print(f"❌ Erreur {response.status_code}: {response.text}")
+
+# Récupérer les articles pour chaque pays (NewsAPI)
+for country, language in country_language_map.items():
+    get_newsapi_articles(country, language)
+
+# Récupérer les articles depuis GDELT
+get_gdelt_articles()
+
+import requests
+from pymongo import MongoClient
+
+API_KEY = "4aa659261bd2443997ffc38ef5c851fd"  # Remplace par ta clé API
+URL = "https://newsapi.org/v2/everything"
+
+def get_articles(query="politique", language="fr", page_size=10):
+    """ Récupère des articles d’actualité et les structure en JSON. """
+    params = {
+        "q": query,
+        "language": language,
+        "pageSize": page_size,
+        "apiKey": API_KEY
+    }
+
+    response = requests.get(URL, params=params)
+    data = response.json()
+
+    if data["status"] != "ok":
+        print("Erreur :", data)
+        return []
+
+    # Structuration des articles sous forme de documents JSON
+    articles = [
+        {
+            "title": article["title"],
+            "author": article.get("author", "Inconnu"),
+            "publication_date": article["publishedAt"],
+            "content": article.get("content", "Aucun contenu"),
+            "url": article["url"],
+            "source": article["source"]["name"],
+            "tags": query
+        }
+        for article in data["articles"]
+    ]
+
+    return articles  # Retourne une liste de dictionnaires JSON
+
+# Test : récupérer 5 articles
+articles_json = get_articles("climat", "fr", 5)
+print(articles_json)
+
+def save_articles_to_mongo(articles):
+    """ Sauvegarde une liste d'articles dans MongoDB. """
+    # Connexion à MongoDB
+    client = MongoClient('mongodb://localhost:27017/')
+    db = client['articles_db']
+    articles_collection = db['articles']
+
+    if articles:
+        articles_collection.insert_many(articles)
+        print(f"{len(articles)} articles sauvegardés dans MongoDB.")
+    else:
+        print("Aucun article à enregistrer.")
+
+# Sauvegarde des articles récupérés
+save_articles_to_mongo(articles_json)
+
+# Étape 1 — Nettoyer le texte avec spaCy
+import spacy
+
+nlp = spacy.load("en_core_web_sm")
+
+def clean_text(text):
+    doc = nlp(text)
+    tokens = [token.lemma_.lower() for token in doc if not token.is_stop and token.is_alpha]
+    return " ".join(tokens)
+
+# Préparation du dataset supervisé
+import pandas as pd
+
+# Exemple minimal : à adapter avec ton vrai jeu de données
+data = {
+    "text": [
+        "I love this product!",
+        "This is awful and I hate it.",
+        "It’s okay, nothing special.",
+    ],
+    "label": ["joy", "anger", "neutral"]
+}
+df = pd.DataFrame(data)
+df["cleaned_text"] = df["text"].apply(clean_text)
+
+
+# Tokenisation avec DistilBERT
+
+from transformers import AutoTokenizer
+from datasets import Dataset
+
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+
+dataset = Dataset.from_pandas(df)
+def tokenize(batch):
+    return tokenizer(batch["cleaned_text"], padding=True, truncation=True)
+
+tokenized_dataset = dataset.map(tokenize, batched=True)
+
+
+
+# Entraîner le modèle DistilBERT pour la classification des émotions
+from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    "distilbert-base-uncased",
+    num_labels=3  # selon ton dataset
+)
+
+training_args = TrainingArguments(
+    output_dir="./emotion_model",
+    evaluation_strategy="epoch",
+    per_device_train_batch_size=8,
+    num_train_epochs=3,
+    logging_dir="./logs"
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_dataset,
+    eval_dataset=tokenized_dataset,
+    tokenizer=tokenizer
+)
+
+trainer.train()
+
+# Sauvegarder le modèle: Intégration MongoDB avec ton modèle
+from transformers import pipeline
+
+emotion_model = pipeline("text-classification", model="./emotion_model", tokenizer=tokenizer)
+
+def detect_emotion_custom(text):
+    scores = emotion_model(text[:512])
+    return max(scores, key=lambda x: x["score"])["label"]
+
+
+#Étape 2 — Analyser les émotions des articles avec le modèle distilroberta
+# À intégrer juste après la sauvegarde MongoDB.
+
+from transformers import pipeline
+
+# Initialisation du modèle d'analyse d'émotion
+emotion_classifier = pipeline(
+    "text-classification",
+    model="j-hartmann/emotion-english-distilroberta-base",
+    return_all_scores=True
+)
+
+def detect_emotion(text):
+    """Retourne l’émotion dominante d’un texte"""
+    if not text:
+        return "Neutral"
+    scores = emotion_classifier(text[:512])  # Limite pour éviter dépassement token
+    top_emotion = max(scores[0], key=lambda x: x["score"])
+    return top_emotion["label"]
+
+def annotate_articles_with_emotions():
+    """Ajoute une émotion dominante aux articles"""
+    client = MongoClient('mongodb://localhost:27017/')
+    db = client['articles_db']
+    collection = db['articles']
+
+    for article in collection.find({"emotion": {"$exists": False}}):
+        text = article.get("content", "") or article.get("description", "")
+        emotion = detect_emotion(text)
+        collection.update_one(
+            {"_id": article["_id"]},
+            {"$set": {"emotion": emotion}}
+        )
+        print(f"🎭 Émotion détectée : {emotion} → Article : {article['title']}")
+
+annotate_articles_with_emotions()
+
+# Étape 3 — Afficher les émotions avec matplotlib
+
+import matplotlib.pyplot as plt
+from collections import Counter
+
+def plot_emotions():
+    """Affiche la distribution des émotions"""
+    client = MongoClient('mongodb://localhost:27017/')
+    db = client['articles_db']
+    collection = db['articles']
+
+    emotions = [doc['emotion'] for doc in collection.find({"emotion": {"$exists": True}})]
+    count = Counter(emotions)
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(count.keys(), count.values(), color='coral')
+    plt.title("Répartition des émotions dans les articles")
+    plt.xlabel("Émotions")
+    plt.ylabel("Occurrences")
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+plot_emotions()
+
+# Résumé des étapes à suivre dans l'ordre :
+
+articles_json = get_articles("climat", "fr", 5)
+save_articles_to_mongo(articles_json)
+
+annotate_articles_with_emotions()
+plot_emotions()

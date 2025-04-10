@@ -1,4 +1,4 @@
-import requests
+import requests 
 
 # Clé API pour NewsAPI
 NEWSAPI_KEY = "4aa659261bd2443997ffc38ef5c851fd"

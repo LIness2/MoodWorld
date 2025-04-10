@@ -119,25 +119,27 @@ articles_json = get_articles("climat", "fr", 5)
 print(articles_json)
 
 def save_articles_to_mongo(articles):
-    """ Sauvegarde une liste d'articles dans MongoDB. """
-    # Connexion à MongoDB
+    """ Sauvegarde une liste d'articles dans MongoDB sans doublons (via l'URL). """
     client = MongoClient('mongodb://localhost:27017/')
     db = client['articles_db']
     articles_collection = db['articles']
 
-    if articles:
-        articles_collection.insert_many(articles)
-        print(f"{len(articles)} articles sauvegardés dans MongoDB.")
-    else:
-        print("Aucun article à enregistrer.")
+    count = 0
+    for article in articles:
+        if not articles_collection.find_one({"url": article["url"]}):
+            articles_collection.insert_one(article)
+            count += 1
 
-# Sauvegarde des articles récupérés
-save_articles_to_mongo(articles_json)
+    if count:
+        print(f"{count} article(s) sauvegardé(s) dans MongoDB.")
+    else:
+        print("✅ Aucun nouvel article à enregistrer (tout est déjà en base).")
+
 
 # Étape 1 — Nettoyer le texte avec spaCy
 import spacy
 
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("fr_core_news_sm")  # si tu analyses des articles FR
 
 def clean_text(text):
     doc = nlp(text)
@@ -145,37 +147,55 @@ def clean_text(text):
     return " ".join(tokens)
 
 # Préparation du dataset supervisé
+
+from sklearn.model_selection import train_test_split
 import pandas as pd
 
-# Exemple minimal : à adapter avec ton vrai jeu de données
+# Ton dataframe de base
 data = {
     "text": [
         "I love this product!",
         "This is awful and I hate it.",
         "It’s okay, nothing special.",
+        "Amazing quality, would buy again.",
+        "Worst experience ever."
     ],
-    "label": ["joy", "anger", "neutral"]
+    "label": ["joy", "anger", "neutral", "joy", "anger"]
 }
 df = pd.DataFrame(data)
 df["cleaned_text"] = df["text"].apply(clean_text)
 
+# Split en 80% train / 20% test
+train_df, val_df = train_test_split(df, test_size=0.2, stratify=df["label"], random_state=42)
+
 
 # Tokenisation avec DistilBERT
 
-from transformers import AutoTokenizer
+from sklearn.model_selection import train_test_split
 from datasets import Dataset
+from transformers import AutoTokenizer
 
+# Tokenizer
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
-dataset = Dataset.from_pandas(df)
+# Split le dataframe
+train_df, val_df = train_test_split(df, test_size=0.2, stratify=df["label"], random_state=42)
+
+# Conversion en datasets
+train_dataset = Dataset.from_pandas(train_df)
+val_dataset = Dataset.from_pandas(val_df)
+
+# Tokenization
 def tokenize(batch):
     return tokenizer(batch["cleaned_text"], padding=True, truncation=True)
 
-tokenized_dataset = dataset.map(tokenize, batched=True)
+train_dataset = train_dataset.map(tokenize, batched=True)
+val_dataset = val_dataset.map(tokenize, batched=True)
 
 
 
 # Entraîner le modèle DistilBERT pour la classification des émotions
+
 from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer
 
 model = AutoModelForSequenceClassification.from_pretrained(
@@ -191,17 +211,20 @@ training_args = TrainingArguments(
     logging_dir="./logs"
 )
 
+
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_dataset,
-    eval_dataset=tokenized_dataset,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
     tokenizer=tokenizer
 )
+
 
 trainer.train()
 
 # Sauvegarder le modèle: Intégration MongoDB avec ton modèle
+
 from transformers import pipeline
 
 emotion_model = pipeline("text-classification", model="./emotion_model", tokenizer=tokenizer)
@@ -217,6 +240,7 @@ def detect_emotion_custom(text):
 from transformers import pipeline
 
 # Initialisation du modèle d'analyse d'émotion
+
 emotion_classifier = pipeline(
     "text-classification",
     model="j-hartmann/emotion-english-distilroberta-base",
@@ -273,6 +297,16 @@ def plot_emotions():
 
 plot_emotions()
 
+
+# afficher un top des titres pour chaque émotion détectée
+
+def show_articles_by_emotion(emotion):
+    articles = collection.find({"emotion": emotion})
+    print(f"\n📰 Articles avec l’émotion : {emotion}")
+    for article in articles:
+        print(f"• {article['title']} ({article['source']})")
+
+
 # Résumé des étapes à suivre dans l'ordre :
 
 articles_json = get_articles("climat", "fr", 5)
@@ -280,3 +314,7 @@ save_articles_to_mongo(articles_json)
 
 annotate_articles_with_emotions()
 plot_emotions()
+
+
+
+

@@ -1,0 +1,130 @@
+# worldmood_nlp.py (Version réelle sans exemples de test ou jeux factices)
+
+# === 1. Imports & Configuration ===
+import requests
+import spacy
+import pandas as pd
+import matplotlib.pyplot as plt
+from pymongo import MongoClient
+from collections import Counter
+from datasets import Dataset
+from sklearn.model_selection import train_test_split
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification,
+                          TrainingArguments, Trainer, pipeline)
+import warnings
+warnings.filterwarnings("ignore")
+
+# === Config ===
+NEWSAPI_KEY = "4aa659261bd2443997ffc38ef5c851fd"
+NEWSAPI_URL = "https://newsapi.org/v2/everything"
+USE_CUSTOM_MODEL = False  # True pour utiliser ton modèle fine-tuné
+
+# === 2. Collecte des Articles ===
+def get_articles(query="politique", language="fr", page_size=10):
+    params = {
+        "q": query,
+        "language": language,
+        "pageSize": page_size,
+        "apiKey": NEWSAPI_KEY
+    }
+    response = requests.get(NEWSAPI_URL, params=params)
+    if response.status_code != 200:
+        print("Erreur :", response.json())
+        return []
+    return [
+        {
+            "title": a["title"],
+            "author": a.get("author", "Inconnu"),
+            "publication_date": a["publishedAt"],
+            "content": a.get("content", ""),
+            "url": a["url"],
+            "source": a["source"]["name"],
+            "tags": query
+        } for a in response.json().get("articles", [])
+    ]
+
+# === 3. Stockage MongoDB ===
+def save_articles_to_mongo(articles):
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["articles_db"]
+    coll = db["articles"]
+    count = 0
+    for a in articles:
+        if not coll.find_one({"url": a["url"]}):
+            coll.insert_one(a)
+            count += 1
+    print(f"{count} article(s) ajouté(s) dans MongoDB.")
+
+# === 4. Nettoyage Texte ===
+nlp = spacy.load("fr_core_news_sm")
+def clean_text(text):
+    doc = nlp(text)
+    return " ".join([token.lemma_.lower() for token in doc if not token.is_stop and token.is_alpha])
+
+# === 5. Entraînement Custom Model ===
+def train_custom_model(texts, labels, model_name="distilbert-base-uncased"):
+    df = pd.DataFrame({"text": texts, "label": labels})
+    df["cleaned_text"] = df["text"].apply(clean_text)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df["label"], random_state=42)
+    train_dataset = Dataset.from_pandas(train_df)
+    val_dataset = Dataset.from_pandas(val_df)
+    train_dataset = train_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    val_dataset = val_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=len(set(labels)))
+    args = TrainingArguments(output_dir="./emotion_model", num_train_epochs=3, per_device_train_batch_size=4)
+    trainer = Trainer(model=model, args=args, train_dataset=train_dataset, eval_dataset=val_dataset, tokenizer=tokenizer)
+    trainer.train()
+    model.save_pretrained("./emotion_model")
+    tokenizer.save_pretrained("./emotion_model")
+
+# === 6. Chargement des Modèles ===
+custom_model = pipeline("text-classification", model="./emotion_model", tokenizer="./emotion_model")
+roberta_model = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
+
+def detect_emotion_custom(text):
+    return max(custom_model(text[:512]), key=lambda x: x['score'])["label"]
+
+def detect_emotion(text):
+    result = roberta_model(text[:512])[0]
+    return max(result, key=lambda x: x["score"])["label"]
+
+def detect(text):
+    return detect_emotion_custom(text) if USE_CUSTOM_MODEL else detect_emotion(text)
+
+# === 7. Mise à jour MongoDB ===
+def annotate_articles_with_emotions():
+    client = MongoClient("mongodb://localhost:27017/")
+    coll = client["articles_db"]["articles"]
+    for a in coll.find({"emotion": {"$exists": False}}):
+        content = a.get("content") or a.get("description") or ""
+        emotion = detect(content)
+        coll.update_one({"_id": a["_id"]}, {"$set": {"emotion": emotion}})
+        print(f"✅ {emotion} - {a['title']}")
+
+# === 8. Visualisation Matplotlib ===
+def plot_emotions():
+    client = MongoClient("mongodb://localhost:27017/")
+    coll = client["articles_db"]["articles"]
+    emotions = [a["emotion"] for a in coll.find({"emotion": {"$exists": True}})]
+    counts = Counter(emotions)
+    plt.bar(counts.keys(), counts.values(), color="orange")
+    plt.title("Distribution des émotions")
+    plt.xlabel("Emotion")
+    plt.ylabel("Articles")
+    plt.show()
+
+# === 9. Explorer par émotion ===
+def show_articles_by_emotion(emotion):
+    client = MongoClient("mongodb://localhost:27017/")
+    coll = client["articles_db"]["articles"]
+    print(f"\nArticles avec l'émotion : {emotion}")
+    for a in coll.find({"emotion": emotion}):
+        print(f"• {a['title']} ({a['source']})")
+
+# === 10. Main ===
+if __name__ == "__main__":
+    articles = get_articles("climat", "fr", 5)
+    save_articles_to_mongo(articles)
+    annotate_articles_with_emotions()
+    plot_emotions()

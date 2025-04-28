@@ -1,0 +1,236 @@
+import requests
+import subprocess
+import pandas as pd
+import matplotlib.pyplot as plt
+from pymongo import MongoClient
+from collections import Counter
+from datasets import Dataset
+from sklearn.model_selection import train_test_split
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline)
+from datetime import datetime
+import geocoder
+from deep_translator import GoogleTranslator
+import warnings
+warnings.filterwarnings("ignore")
+
+# === CONFIGURATION ===
+NEWSAPI_KEY = "4aa659261bd2443997ffc38ef5c851fd"  # ← Utilisation de ta clé initiale
+NEWSAPI_URL = "https://newsapi.org/v2/everything"
+USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
+
+# === CHARGEMENT DES PIPELINES ===
+emotion_pipeline = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
+
+try:
+    custom_model = pipeline("text-classification", model="./emotion_model", tokenizer="./emotion_model")
+except:
+    custom_model = None
+
+# === OUTILS NLP ===
+tokenizer_cleaner = AutoTokenizer.from_pretrained("camembert-base")
+
+def clean_text(text):
+    tokens = tokenizer_cleaner.tokenize(text)
+    return " ".join(tokens)
+
+# === MONGODB ===
+client = MongoClient("mongodb://localhost:27017/")
+db = client["articles_db"]
+collection = db["articles"]
+
+# === TRADUCTION ===
+def translate_to_english(text, source_lang):
+    if not text or source_lang == "en":
+        return text
+    try:
+        return GoogleTranslator(source=source_lang, target='en').translate(text)
+    except:
+        return text
+
+# === API NEWS ===
+def get_articles(query="politique", language="fr", page_size=10):
+    params = {
+        "q": query,
+        "language": language,
+        "pageSize": page_size,
+        "apiKey": NEWSAPI_KEY
+    }
+    response = requests.get(NEWSAPI_URL, params=params)
+    if response.status_code != 200:
+        print("Erreur :", response.json())
+        return []
+    return [
+        {
+            "title": a["title"],
+            "author": a.get("author", "Inconnu"),
+            "publication_date": a["publishedAt"],
+            "content": a.get("content", ""),
+            "url": a["url"],
+            "source": a["source"]["name"],
+            "tags": query,
+            "lang": language
+        } for a in response.json().get("articles", [])
+    ]
+
+def save_articles_to_mongo(articles):
+    count = 0
+    for a in articles:
+        if not collection.find_one({"url": a["url"]}):
+            collection.insert_one(a)
+            count += 1
+    print(f"{count} article(s) ajouté(s) dans MongoDB.")
+
+# === EMOTIONS ===
+def detect_emotion_custom(text):
+    return max(custom_model(text[:512]), key=lambda x: x['score'])["label"]
+
+def detect_emotion(text):
+    result = emotion_pipeline(text[:512])[0]
+    return max(result, key=lambda x: x["score"])["label"]
+
+def detect(text):
+    if USE_CUSTOM_MODEL and custom_model:
+        label = detect_emotion_custom(text)
+        score = None
+    else:
+        result = emotion_pipeline(text[:512])[0]
+        sorted_res = sorted(result, key=lambda x: x["score"], reverse=True)
+        label = sorted_res[0]["label"]
+        score = round(sorted_res[0]["score"], 3)
+    return label, score
+
+def annotate_articles_with_emotions():
+    for article in collection.find({"emotion": {"$exists": False}}):
+        original_text = article.get("content") or article.get("description") or ""
+        if not original_text:
+            continue
+
+        lang = article.get("lang", "en")
+        translated_text = translate_to_english(original_text, source_lang=lang)
+
+        if not translated_text.strip():
+            continue
+
+        emotion_label, emotion_score = detect(translated_text)
+
+        couleur_map = {
+            "joy": "jaune", "sadness": "bleu", "anger": "rouge",
+            "fear": "violet", "love": "rose", "surprise": "orange"
+        }
+        couleur = couleur_map.get(emotion_label, "gris")
+        pays = geocoder.ip('me').country or "Inconnu"
+
+        collection.update_one(
+            {"_id": article["_id"]},
+            {"$set": {
+                "emotion": emotion_label,
+                "score_emotion": emotion_score,
+                "translated_text": translated_text,
+                "couleur": couleur,
+                "pays": pays,
+                "timestamp": datetime.utcnow().isoformat()
+            }}
+        )
+        print(f"✅ {emotion_label} ({lang} ➜ en | {pays}) - {article['title']}")
+
+# === MODEL TRAINING ===
+def train_custom_model(texts, labels, model_name="distilbert-base-uncased"):
+    df = pd.DataFrame({"text": texts, "label": labels})
+    df["cleaned_text"] = df["text"].apply(clean_text)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df["label"], random_state=42)
+    train_dataset = Dataset.from_pandas(train_df)
+    val_dataset = Dataset.from_pandas(val_df)
+    train_dataset = train_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    val_dataset = val_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=len(set(labels)))
+    args = TrainingArguments(output_dir="./emotion_model", num_train_epochs=3, per_device_train_batch_size=4)
+    trainer = Trainer(model=model, args=args, train_dataset=train_dataset, eval_dataset=val_dataset, tokenizer=tokenizer)
+    trainer.train()
+    model.save_pretrained("./emotion_model")
+    tokenizer.save_pretrained("./emotion_model")
+
+# === VISUALISATION ===
+def plot_emotions():
+    emotions = [a["emotion"] for a in collection.find({"emotion": {"$exists": True}})]
+    counts = Counter(emotions)
+    plt.bar(counts.keys(), counts.values(), color="orange")
+    plt.title("Distribution des émotions")
+    plt.xlabel("Émotion")
+    plt.ylabel("Articles")
+    plt.show()
+
+def show_articles_by_emotion(emotion):
+    print(f"\nArticles avec l'émotion : {emotion}")
+    for a in collection.find({"emotion": emotion}):
+        print(f"• {a['title']} ({a['source']})")
+
+# === NEWSAPI ALTERNATIF : par pays/langue spécifiques ===
+TOPICS_ALT = {
+    "France": ("fr", "politique OR économie OR Ukraine OR Israël"),
+    "USA": ("en", "election OR Trump OR economy OR Ukraine OR Gaza"),
+    "Germany": ("de", "wirtschaft OR politik OR ukraine OR israel")
+}
+
+def get_newsapi_articles_alternative():
+    total = 0
+    for country, (lang, keywords) in TOPICS_ALT.items():
+        print(f"\n📰 Articles pour {country} ({lang})")
+        for page in range(1, 4):
+            params = {
+                "q": keywords,
+                "language": lang,
+                "sortBy": "publishedAt",
+                "apiKey": NEWSAPI_KEY,
+                "pageSize": 20,
+                "page": page
+            }
+            response = requests.get(NEWSAPI_URL, params=params)
+            if response.status_code != 200:
+                print(f"❌ Erreur {response.status_code}: {response.text}")
+                break
+            data = response.json()
+            articles = data.get("articles", [])
+            if not articles:
+                break
+            save_articles_to_mongo([
+                {
+                    "title": a["title"],
+                    "author": a.get("author", "Inconnu"),
+                    "publication_date": a["publishedAt"],
+                    "content": a.get("content", ""),
+                    "url": a["url"],
+                    "source": a["source"]["name"],
+                    "tags": keywords,
+                    "lang": lang
+                } for a in articles
+            ])
+            total += len(articles)
+            if len(articles) < 20:
+                break
+    print(f"\n✅ Total articles récupérés (alternative) : {total}")
+
+# === SCRAPY ===
+def run_scrapy_spider():
+    print("\n🕷️ Scrapy - Lancement du spider 'news_spider'")
+    try:
+        subprocess.run(['scrapy', 'crawl', 'news'], cwd='test_scrapy', check=True)
+    except subprocess.CalledProcessError as e:
+        print("❌ Erreur Scrapy:", e)
+
+# === SCRIPT PRINCIPAL ===
+if __name__ == "__main__":
+    get_newsapi_articles_alternative()
+    run_scrapy_spider()
+
+    topics = ["politique", "écologie", "technologie", "culture", "économie"]
+    languages = ["fr", "en", "de", "es", "it", "pt", "ru", "zh", "ar"]
+
+    for topic in topics:
+        for lang in languages:
+            print(f"\n🌍 Récupération articles : '{topic}' en [{lang}]")
+            articles = get_articles(query=topic, language=lang, page_size=5)
+            save_articles_to_mongo(articles)
+
+    annotate_articles_with_emotions()
+    plot_emotions()

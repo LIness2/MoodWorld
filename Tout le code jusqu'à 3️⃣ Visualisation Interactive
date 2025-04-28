@@ -5,8 +5,7 @@ from pymongo import MongoClient
 from collections import Counter
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
-from transformers import (AutoTokenizer, AutoModelForSequenceClassification,
-                          TrainingArguments, Trainer, pipeline)
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline)
 from datetime import datetime
 import geocoder
 from deep_translator import GoogleTranslator
@@ -19,9 +18,7 @@ NEWSAPI_URL = "https://newsapi.org/v2/everything"
 USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
 
 # === CHARGEMENT DES PIPELINES ===
-emotion_pipeline = pipeline("text-classification", 
-                            model="j-hartmann/emotion-english-distilroberta-base", 
-                            return_all_scores=True)
+emotion_pipeline = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
 
 try:
     custom_model = pipeline("text-classification", model="./emotion_model", tokenizer="./emotion_model")
@@ -180,7 +177,6 @@ if __name__ == "__main__":
 
     annotate_articles_with_emotions()
     plot_emotions()
-
 
 
 

@@ -11,29 +11,46 @@ import geocoder
 from deep_translator import GoogleTranslator
 import warnings
 warnings.filterwarnings("ignore")
+import nltk
+nltk.download('stopwords')  # 👈 à exécuter une fois
+from nltk.corpus import stopwords #temporairement
+stop_words = set(stopwords.words('french'))
+import os
+print("Répertoire courant :", os.getcwd())
+from scraper import get_articles
+
 
 # === CONFIGURATION ===
 NEWSAPI_KEY1 = "4aa659261bd2443997ffc38ef5c851fd"
 NEWSAPI_URL1 = "https://newsapi.org/v2/everything"
+
+NEWSAPI_URL2 = "https://newsapi.io/api/v4/search"
+NEWSAPI_KEY2 = "e275d891ea6264bcdc91bfd73567c65b"
 USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
 
-NEWSAPI_URL2 = "https://newsapi.org/v2/everything"
-NEWSAPI_KEY2 = "9b3e8b1adf7e4f21a69ee8c2749c3037"
-USE_CUSTOM_MODEL = False
-
 # === CHARGEMENT DES PIPELINES ===
-emotion_pipeline = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
+emotion_pipeline =  pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
 
 try:
     custom_model = pipeline("text-classification", model="./emotion_model", tokenizer="./emotion_model")
 except:
     custom_model = None
 
-# === OUTILS NLP ===
+# === OUTILS NLP pour le nettoyage ===
 tokenizer_cleaner = AutoTokenizer.from_pretrained("camembert-base")
 
+stop_words = set(stopwords.words('french'))  # adapter à la langue
+
 def clean_text(text):
-    tokens = tokenizer_cleaner.tokenize(text)
+    # passage en minuscules
+    text = text.lower()
+    # suppression ponctuation et caractères non alphabétiques
+    text = re.sub(r'[^a-zàâçéèêëîïôûùüÿñæœ\s]', '', text)
+    # tokenization simple par espaces
+    tokens = text.split()
+    # suppression stopwords
+    tokens = [t for t in tokens if t not in stop_words]
+    # tu peux aussi utiliser tokenizer_cleaner.tokenize si tu veux
     return " ".join(tokens)
 
 # === MONGODB ===
@@ -50,12 +67,15 @@ def translate_to_english(text, source_lang):
     except:
         return text  # fallback: return as is
 
-# === API NEWS ===
-def get_articles(query="politique", language="fr", page_size=10):
+# Récupérer les articles depuis NewsAPI 1
+def get_newsapi_articles(country, language, query="", max_pages=5):
+    print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
+
+    total_articles = 0  # <- Il faut initialiser cette variable avant la boucle
     params = {
         "q": query,
         "language": language,
-        "pageSize": page_size,
+        "pageSize": 10,
         "apiKey": NEWSAPI_KEY1
     }
     response = requests.get(NEWSAPI_URL1, params=params)
@@ -77,14 +97,16 @@ def get_articles(query="politique", language="fr", page_size=10):
 
 
 # Récupérer les articles depuis NewsAPI 2 en paginant
-def get_newsapi_articles(country, language):
-    params = newsapi_params.copy()
-    params["language"] = language
-    max_pages = 5  # Nombre maximal de pages à récupérer (pour un total de 100 articles)
-    total_articles = 0
-
+def get_newsapi_articles(country, language, query="", max_pages=5):
     print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
 
+    total_articles = 0  # <- Il faut initialiser cette variable avant la boucle
+    params = {
+        "q": query,
+        "language": language,
+        "pageSize": 10,
+        "apiKey": NEWSAPI_KEY2
+    }
     for page in range(1, max_pages + 1):
         params["page"] = page
         response = requests.get(NEWSAPI_URL2, params=params)
@@ -117,6 +139,8 @@ def save_articles_to_mongo(articles):
 
 # === EMOTIONS ===
 def detect_emotion_custom(text):
+    if custom_model is None:
+        raise ValueError("Le modèle personnalisé n'est pas chargé.")
     return max(custom_model(text[:512]), key=lambda x: x['score'])["label"]
 
 def detect_emotion(text):
@@ -124,9 +148,17 @@ def detect_emotion(text):
     return max(result, key=lambda x: x["score"])["label"]
 
 def detect(text):
-    if USE_CUSTOM_MODEL and custom_model:
-        label = detect_emotion_custom(text)
-        score = None
+    if USE_CUSTOM_MODEL:
+        if custom_model is not None:
+            label = detect_emotion_custom(text)
+            score = None
+        else:
+            print("⚠️ Custom model non chargé, utilisation du modèle standard")
+            # fallback sur emotion_pipeline
+            result = emotion_pipeline(text[:512])[0]
+            sorted_res = sorted(result, key=lambda x: x["score"], reverse=True)
+            label = sorted_res[0]["label"]
+            score = round(sorted_res[0]["score"], 3)
     else:
         result = emotion_pipeline(text[:512])[0]
         sorted_res = sorted(result, key=lambda x: x["score"], reverse=True)
@@ -200,16 +232,49 @@ def show_articles_by_emotion(emotion):
     for a in collection.find({"emotion": emotion}):
         print(f"• {a['title']} ({a['source']})")
 
-# === SCRIPT PRINCIPAL ===
-if __name__ == "__main__":
-    topics = ["politique", "écologie", "technologie", "culture", "économie"]
-    languages = ["fr", "en", "de", "es", "it", "pt", "ru", "zh", "ar", "ja"]
+# === CONFIGURATION MULTI-THEMES / MULTI-LANGUES ===
+# config.py
+THEMES = ["politique", "Ukraine", "Guerre", "culture", "économie", "Israël"]
 
-    for topic in topics:
-        for lang in languages:
-            print(f"\n🌍 Récupération articles : '{topic}' en [{lang}]")
-            articles = get_articles(query=topic, language=lang, page_size=5)
+LANGUAGES = ["fr", "en", "de", "he", "ze", "en", "es", "it", "pt", "ru", "zh", "ar", "fa"]
+
+TOPICS_BY_COUNTRY = {
+    "France": ("fr", "politique OR économie OR Ukraine OR Israël"),
+    "USA": ("en", "election OR Trump OR economy OR Gaza"),
+    "Germany": ("de", "wirtschaft OR politik OR ukraine OR israel"),
+    "Israel": ("he", "נתניהו OR עזה OR פוליטיקה OR ביטחון"),
+    "China": ("zh", "政治 OR 经济 OR 台湾 OR 美国"),
+    "Russia": ("ru", "политика OR экономика OR Украина OR США"),
+    "Nigeria": ("en", "election OR Buhari OR economy OR conflict"),
+    "South Africa": ("en", "Ramaphosa OR politics OR economy OR BRICS"),
+    "Egypt": ("ar", "السيسي OR سياسة OR اقتصاد OR غزة"),
+    "Brazil": ("pt", "política OR economia OR Lula OR Bolsonaro"),
+    "India": ("en", "Modi OR BJP OR Kashmir OR economy"),
+    "Pakistan": ("en", "Imran Khan OR politics OR military OR Kashmir"),
+    "Iran": ("fa", "رئیسی OR سیاست OR اقتصاد OR اسرائیل"),
+    "Saudi Arabia": ("ar", "بن سلمان OR سياسة OR اقتصاد OR نفط")
+}
+# === SCRIPT PRINCIPAL ===
+
+def run_country_specific_scraping():
+    for country, (lang, query) in TOPICS_BY_COUNTRY.items():
+        print(f"\n🌍 Récupération des articles pour {country} [{lang}] avec les mots-clés : {query}")
+        articles = get_articles(query=query, language=lang, page_size=5)
+        save_articles_to_mongo(articles)
+
+def run_general_theme_scraping():
+    for theme in THEMES:
+        for lang in LANGUAGES:
+            print(f"\n📰 Recherche générale : thème '{theme}' en [{lang}]")
+            articles = get_articles(query=theme, language=lang, page_size=5)
             save_articles_to_mongo(articles)
+
+if __name__ == "__main__":
+    print("=== Scraping par pays ciblés ===")
+    run_country_specific_scraping()
+
+    print("\n=== Scraping général multi-thèmes / multi-langues ===")
+    run_general_theme_scraping()
 
     annotate_articles_with_emotions()
     plot_emotions()

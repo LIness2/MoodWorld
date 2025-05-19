@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
-from collections import Counter 
+from collections import Counter
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
 from transformers import (AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline)
@@ -13,9 +13,13 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # === CONFIGURATION ===
-NEWSAPI_KEY = "4aa659261bd2443997ffc38ef5c851fd"
-NEWSAPI_URL = "https://newsapi.org/v2/everything"
+NEWSAPI_KEY1 = "4aa659261bd2443997ffc38ef5c851fd"
+NEWSAPI_URL1 = "https://newsapi.org/v2/everything"
 USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
+
+NEWSAPI_URL2 = "https://newsapi.org/v2/everything"
+NEWSAPI_KEY2 = "9b3e8b1adf7e4f21a69ee8c2749c3037"
+USE_CUSTOM_MODEL = False
 
 # === CHARGEMENT DES PIPELINES ===
 emotion_pipeline = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
@@ -52,9 +56,9 @@ def get_articles(query="politique", language="fr", page_size=10):
         "q": query,
         "language": language,
         "pageSize": page_size,
-        "apiKey": NEWSAPI_KEY
+        "apiKey": NEWSAPI_KEY1
     }
-    response = requests.get(NEWSAPI_URL, params=params)
+    response = requests.get(NEWSAPI_URL1, params=params)
     if response.status_code != 200:
         print("Erreur :", response.json())
         return []
@@ -70,6 +74,38 @@ def get_articles(query="politique", language="fr", page_size=10):
             "lang": language
         } for a in response.json().get("articles", [])
     ]
+
+
+# Récupérer les articles depuis NewsAPI 2 en paginant
+def get_newsapi_articles(country, language):
+    params = newsapi_params.copy()
+    params["language"] = language
+    max_pages = 5  # Nombre maximal de pages à récupérer (pour un total de 100 articles)
+    total_articles = 0
+
+    print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
+
+    for page in range(1, max_pages + 1):
+        params["page"] = page
+        response = requests.get(NEWSAPI_URL2, params=params)
+
+        if response.status_code == 200:
+            data = response.json()
+            articles = data.get("articles", [])
+            if not articles:
+                break
+
+            for article in articles:
+                print(f"📌 {article['title']} ({article['source']['name']})")
+                print(f"🔗 {article['url']}\n")
+                total_articles += 1
+        else:
+            print(f"❌ Erreur {response.status_code}: {response.text}")
+            break
+
+    if total_articles == 0:
+        print("❌ Aucun article trouvé.")
+
 
 def save_articles_to_mongo(articles):
     count = 0
@@ -167,7 +203,7 @@ def show_articles_by_emotion(emotion):
 # === SCRIPT PRINCIPAL ===
 if __name__ == "__main__":
     topics = ["politique", "écologie", "technologie", "culture", "économie"]
-    languages = ["fr", "en", "de", "es", "it", "pt", "ru", "zh", "ar"]
+    languages = ["fr", "en", "de", "es", "it", "pt", "ru", "zh", "ar", "ja"]
 
     for topic in topics:
         for lang in languages:

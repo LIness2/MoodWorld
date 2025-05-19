@@ -1,0 +1,46 @@
+import pandas as pd
+import plotly.express as px
+
+# Données exemple
+data = {
+    "theme": ["économie", "économie", "économie", "politique", "politique", "politique"],
+    "country": ["France", "Germany", "Italy", "France", "Germany", "Italy"],
+    "emotion": ["joy", "sadness", "anger", "fear", "joy", "sadness"],
+    "count": [20, 15, 10, 12, 25, 5]
+}
+
+df = pd.DataFrame(data)
+
+# Couleurs personnalisées pour chaque émotion
+emotion_colors = {
+    "joy": "yellow",
+    "sadness": "blue",
+    "anger": "red",
+    "fear": "purple",
+    "surprise": "orange"
+}
+
+# Création du graphique en barres
+fig = px.bar(
+    df,
+    x="country",
+    y="count",
+    color="emotion",
+    facet_col="theme",
+    color_discrete_map=emotion_colors,
+    title="Émotion dominante par thème et par pays",
+    labels={
+        "country": "Pays",
+        "count": "Nombre d’articles",
+        "emotion": "Émotion dominante",
+        "theme": "Thème"
+    },
+    hover_data={"emotion": True, "count": True}
+)
+
+fig.update_layout(
+    height=500,
+    template="plotly_white"
+)
+
+fig.show()

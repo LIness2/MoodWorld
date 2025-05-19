@@ -1,0 +1,41 @@
+# Importation des bibliothèques nécessaires
+import pandas as pd
+import plotly.express as px
+
+# Données d'exemple
+data = {
+    "country": ["France", "Germany", "France", "Germany", "USA", "USA", "France"],
+    "emotion": ["Positive", "Negative", "Neutral", "Positive", "Negative", "Neutral", "Positive"],
+    "nb_articles": [10, 5, 8, 15, 20, 25, 30],
+    "date": ["2025-05-10", "2025-05-10", "2025-05-10", "2025-05-11", "2025-05-11", "2025-05-12", "2025-05-12"],
+    "theme": ["Climat", "Climat", "Santé", "Santé", "Climat", "Santé", "Climat"]
+}
+
+df = pd.DataFrame(data)
+
+# Choix de la date et du thème
+selected_theme = "Climat"
+selected_date = "2025-05-10"
+
+# Filtrage des données
+filtered_df = df[(df["theme"] == selected_theme) & (df["date"] == selected_date)]
+
+# Création de la carte interactive
+fig = px.scatter_geo(
+    filtered_df,
+    locations="country",
+    locationmode="country names",
+    color="emotion",
+    size="nb_articles",
+    hover_name="country",
+    hover_data={"nb_articles": True, "emotion": True, "theme": False, "date": False},
+    projection="natural earth",
+    title=f"Répartition des émotions pour le thème '{selected_theme}' le {selected_date}"
+)
+
+fig.update_layout(
+    geo=dict(showframe=False, showcoastlines=True),
+    legend_title="Émotions"
+)
+
+fig.show()

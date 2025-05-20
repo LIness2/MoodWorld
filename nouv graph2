@@ -1,0 +1,70 @@
+import pymongo
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+
+# --- PARAMÈTRES ---
+MONGO_URI = "mongodb://localhost:27017"  # adapte si besoin
+DB_NAME = "your_database_name"
+COLLECTION_NAME = "your_collection_name"
+theme = "écologie"  # ← Choisis ton thème ici
+
+# --- CONNEXION MONGODB ---
+client = pymongo.MongoClient(MONGO_URI)
+collection = client[DB_NAME][COLLECTION_NAME]
+
+# --- FILTRAGE DES DONNÉES ---
+articles = collection.find({"theme": theme})
+
+# --- EXTRACTION DES DONNÉES ---
+data = []
+for doc in articles:
+    pays = doc.get("country", "Inconnu")
+    date_str = doc.get("date", None)
+    emotions = doc.get("emotions", {})
+
+    if date_str:
+        try:
+            annee = datetime.strptime(date_str, "%Y-%m-%d").year
+        except:
+            continue
+    else:
+        continue
+
+    for emotion, score in emotions.items():
+        if score > 0:
+            data.append({
+                "Pays": pays,
+                "Année": annee,
+                "Émotion": emotion,
+                "Nombre": 1
+            })
+
+# --- CRÉATION DATAFRAME ---
+df = pd.DataFrame(data)
+
+if df.empty:
+    print("Aucune donnée trouvée pour ce thème.")
+else:
+    df_grouped = df.groupby(["Pays", "Année", "Émotion"]).count().reset_index()
+
+    # --- VISUALISATION ---
+    fig = px.scatter(
+        df_grouped,
+        x="Pays",
+        y="Année",
+        size="Nombre",
+        color="Émotion",
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        hover_data={"Pays": True, "Année": True, "Émotion": True, "Nombre": True},
+        title=f"Émotions par pays et par année pour le thème : {theme}"
+    )
+
+    fig.update_layout(
+        xaxis_title="Pays",
+        yaxis_title="Année",
+        legend_title="Émotion",
+        template="plotly_white"
+    )
+
+    fig.show() moi je veux executer ce code

@@ -24,10 +24,12 @@ import plotly.graph_objects as go
 from datetime import datetime
 import json
 from bson.json_util import dumps
+from datetime import datetime
+
 
 # === CONFIGURATION ===
-NEWSAPI_URL = "https://newsapi.org/api/v4/search"
-NEWSAPI_KEY = "e275d891ea6264bcdc91bfd73567c65b"
+NEWSAPI_URL = "https://newsapi.org/api/v4/Everything"
+NEWSAPI_KEY = "5cc959f32-de5449ea982ea306e99cd0d"
 USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
 
 # === CHARGEMENT DES PIPELINES ===
@@ -263,58 +265,111 @@ def get_articles_dataframe():
     return df
 
 
-# Connexion à MongoDB
-client = MongoClient("mongodb://localhost:27017/")
-db = client["articles_db"]
-collection = db["articles"]
+# === Connexion à MongoDB et nettoyage des articles ===
+def parse_timestamp(ts):
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    try:
+        return datetime.fromisoformat(ts).isoformat()
+    except:
+        return datetime.now().isoformat()
+@st.cache_resource
+def get_cleaned_articles():
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["articles_db"]
+    collection = db["articles"]
 
-def export_cleaned_articles():
-    cursor = collection.find({"emotion": {"$exists": True}})
-    articles = list(cursor)
+    cleaned_data = []
     
-    # Convertir les ObjectId en string pour JSON
-    with open("cleaned_articles.json", "w") as f:
-        f.write(dumps(articles, indent=2))
+    for article in collection.find({"emotion": {"$exists": True, "$ne": None}}):
+        cleaned_article = {
+            "_id": str(article["_id"]),
+            "country": article.get("country", "Unknown"),
+            "emotion": article.get("emotion", "neutral"),
+            "score_emotion": float(article.get("score_emotion", 0)),
+            "theme": article.get("theme", "unknown"),
+            "timestamp": parse_timestamp(article.get("timestamp")),
+            "date": str(article.get("date", datetime.now().date())),
+            "nb_articles": 1
+        }
+        cleaned_data.append(cleaned_article)
+    if not cleaned_data:
+        raise ValueError("Aucune donnée nettoyée trouvée dans MongoDB.")
+    return cleaned_data
 
-if st.button("Lancer le scraping"):
-    run_country_specific_scraping()
-    run_general_theme_scraping()
-
-
-# === Interface Streamlit
+# === Chargement du modèle d'émotion ===
+@st.cache_resource
+def load_emotion_model():
+    try:
+        return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=1)
+    except Exception as e:
+        st.error(f"Erreur lors du chargement du modèle d'émotion : {e}")
+        return None
+    
+# === Interface Streamlit ===
 st.set_page_config(layout="wide")
 st.title("🌍 WorldMood - Analyse émotionnelle de la presse mondiale")
 
-# === Chargement des données ===
-@st.cache_data
-def load_data():
-    with open("cleaned_articles.json", "r") as f:
-        # Charger les articles depuis le fichier JSON
-        data = json.load(f)
-    return pd.DataFrame(data)
+# Lancer le scraping (si les fonctions existent ailleurs)
+if st.button("Lancer le scraping"):
+    run_country_specific_scraping()   # Assure-toi que cette fonction est bien définie quelque part
+    run_general_theme_scraping()
 
-@st.cache_resource
-def load_emotion_model():
-    return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=1)
+# Chargement des articles depuis MongoDB
+articles = get_cleaned_articles()
+
+# Aperçu
+st.write(f"{len(articles)} articles annotés trouvés.")
+st.json(articles[:3])
 
 # === Analyse émotionnelle locale (si besoin) ===
 def analyze_emotions(df, emotion_analyzer):
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("Input data is not a valid DataFrame.")
+
+    df = df.copy()
+
+    # Assurer que 'timestamp' est présent et bien formaté
     if "timestamp" not in df.columns:
         df["timestamp"] = datetime.utcnow().isoformat()
-    
+    else:
+        def parse_timestamp(ts):
+            if isinstance(ts, datetime):
+                return ts
+            try:
+                return datetime.fromisoformat(ts)
+            except:
+                return datetime.utcnow()
+        df["timestamp"] = df["timestamp"].apply(parse_timestamp)
+
+    # Ajouter une colonne 'theme' si manquante
     if "theme" not in df.columns:
         df["theme"] = "inconnu"
 
-    df = df.copy()
+    # Ajouter les émotions si elles ne sont pas présentes
     if "emotion" not in df.columns:
-        df["emotion"] = df["content"].apply(lambda text: emotion_analyzer(text[:512])[0]["label"] if text else "unknown")
-    df["year"] = pd.to_datetime(df["timestamp"]).dt.year
-    df["date"] = pd.to_datetime(df["timestamp"]).dt.date.astype(str)
+        if "content" in df.columns:
+            df["emotion"] = df["content"].apply(
+                lambda text: emotion_analyzer(text[:512])[0]["label"] if isinstance(text, str) and text else "unknown"
+            )
+        else:
+            df["emotion"] = "unknown"
+
+    # Colonnes supplémentaires
+    df["year"] = df["timestamp"].dt.year
+    df["date"] = df["timestamp"].dt.date.astype(str)
     df["nb_articles"] = 1
+
     return df
 
 # === Visualisations ===
 def bubble_map(df, selected_theme, year):
+    if df.empty:
+        raise ValueError("Les données pour la carte à bulles sont vides.")
+    filtered = df[(df["theme"] == selected_theme) & (df["year"] == year)]
+    
+    if filtered.empty:
+        raise ValueError(f"Aucune donnée trouvée pour le thème '{selected_theme}' en {year}.")
     filtered = df[(df["theme"] == selected_theme) & (df["year"] == year)]
     emotion_counts = filtered.groupby(["country", "emotion"]).size().reset_index(name="count")
     emotion_summary = emotion_counts.groupby("country")["count"].sum().reset_index()
@@ -347,28 +402,64 @@ def contour_plot(df, countries, selected_theme, year_range):
     return fig
 
 # === MAIN ===
-raw_data = load_data()
+raw_data = get_cleaned_articles()  # Cette fonction doit renvoyer une liste de dicts
 emotion_pipeline = load_emotion_model()
-data = analyze_emotions(raw_data, emotion_pipeline)
 
-# === Sidebar ===
-theme = st.sidebar.selectbox("🎯 Choisissez un thème", sorted(data["theme"].unique()))
-years = sorted(data["year"].dropna().unique())
-year = st.sidebar.selectbox("🗓️ Année pour la carte à bulles", years)
-year_range = st.sidebar.slider("⏳ Plage d'années pour comparaison", int(min(years)), int(max(years)), (int(min(years)), int(max(years))))
+# Assure-toi que les données sont bien dans un DataFrame
+if isinstance(raw_data, list):
+    df_raw = pd.DataFrame(raw_data)
+else:
+    raise ValueError("get_cleaned_articles() doit renvoyer une liste de dictionnaires.")
+
+# === Gestion des années pour le slider
+if "timestamp" in df_raw.columns:
+    df_raw["year"] = pd.to_datetime(df_raw["timestamp"], errors="coerce").dt.year
+else:
+    st.error("La colonne 'timestamp' est manquante dans les données.")
+    st.stop()
+
+years = sorted(df_raw["year"].dropna().unique())
+if len(years) > 1:
+    year = st.sidebar.selectbox("🗓️ Année pour la carte à bulles", years)
+    year_range = st.sidebar.slider(
+        "⏳ Plage d'années pour comparaison",
+        int(min(years)),
+        int(max(years)),
+        (int(min(years)), int(max(years)))
+    )
+else:
+    year = years[0]
+    year_range = (year, year)
+    st.sidebar.info(f"📅 Une seule année disponible : {year}")
+
+# === Vérification du thème ===
+if "theme" in df_raw.columns and not df_raw["theme"].isna().all():
+    theme = st.sidebar.selectbox("🎯 Choisissez un thème", sorted(df_raw["theme"].dropna().unique()))
+else:
+    st.error("Aucun thème disponible dans les données.")
+    st.stop()
+
 
 # === Graph 1 ===
 st.subheader("📍 Carte mondiale des émotions")
-st.plotly_chart(bubble_map(data, theme, year), use_container_width=True)
+st.plotly_chart(bubble_map(df_raw, theme, year), use_container_width=True)
 
 # === Graph 2 ===
 st.subheader("📈 Comparaison temporelle par pays")
-countries = st.multiselect("Choisissez jusqu’à 3 pays", sorted(data["country"].unique()), max_selections=3)
-if countries:
-    st.plotly_chart(contour_plot(data, countries, theme, year_range), use_container_width=True)
+if "country" in df_raw.columns:
+    countries = st.multiselect(
+        "Choisissez jusqu’à 3 pays", 
+        sorted(df_raw["country"].dropna().unique()), 
+        max_selections=3
+    )
+    if countries:
+        st.plotly_chart(contour_plot(df_raw, countries, theme, year_range), use_container_width=True)
+else:
+    st.warning("Les données ne contiennent pas de pays.")
 
+# === Export JSON (si utile)
 if st.sidebar.button("💾 Exporter en JSON"):
-    export_cleaned_articles()
+    export_cleaned_articles()  # Facultatif si tu veux éviter le fichier JSON
     st.success("✅ Export vers cleaned_articles.json terminé.")
 
 

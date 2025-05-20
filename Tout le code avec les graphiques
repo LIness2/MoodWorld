@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import streamlit as st
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
 from collections import Counter
@@ -11,21 +12,21 @@ import geocoder
 from deep_translator import GoogleTranslator
 import warnings
 warnings.filterwarnings("ignore")
+import re
 import nltk
 nltk.download('stopwords')  # 👈 à exécuter une fois
 from nltk.corpus import stopwords #temporairement
 stop_words = set(stopwords.words('french'))
 import os
 print("Répertoire courant :", os.getcwd())
-from scraper import get_articles
-
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import json
 
 # === CONFIGURATION ===
-NEWSAPI_KEY1 = "4aa659261bd2443997ffc38ef5c851fd"
-NEWSAPI_URL1 = "https://newsapi.org/v2/everything"
-
-NEWSAPI_URL2 = "https://newsapi.io/api/v4/search"
-NEWSAPI_KEY2 = "e275d891ea6264bcdc91bfd73567c65b"
+NEWSAPI_URL = "https://newsapi.org/api/v4/search"
+NEWSAPI_KEY = "e275d891ea6264bcdc91bfd73567c65b"
 USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
 
 # === CHARGEMENT DES PIPELINES ===
@@ -67,7 +68,8 @@ def translate_to_english(text, source_lang):
     except:
         return text  # fallback: return as is
 
-# Récupérer les articles depuis NewsAPI 1
+
+# Récupérer les articles depuis NewsAPI en paginant
 def get_newsapi_articles(country, language, query="", max_pages=5):
     print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
 
@@ -76,40 +78,11 @@ def get_newsapi_articles(country, language, query="", max_pages=5):
         "q": query,
         "language": language,
         "pageSize": 10,
-        "apiKey": NEWSAPI_KEY1
-    }
-    response = requests.get(NEWSAPI_URL1, params=params)
-    if response.status_code != 200:
-        print("Erreur :", response.json())
-        return []
-    return [
-        {
-            "title": a["title"],
-            "author": a.get("author", "Inconnu"),
-            "publication_date": a["publishedAt"],
-            "content": a.get("content", ""),
-            "url": a["url"],
-            "source": a["source"]["name"],
-            "tags": query,
-            "lang": language
-        } for a in response.json().get("articles", [])
-    ]
-
-
-# Récupérer les articles depuis NewsAPI 2 en paginant
-def get_newsapi_articles(country, language, query="", max_pages=5):
-    print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
-
-    total_articles = 0  # <- Il faut initialiser cette variable avant la boucle
-    params = {
-        "q": query,
-        "language": language,
-        "pageSize": 10,
-        "apiKey": NEWSAPI_KEY2
+        "apiKey": NEWSAPI_KEY
     }
     for page in range(1, max_pages + 1):
         params["page"] = page
-        response = requests.get(NEWSAPI_URL2, params=params)
+        response = requests.get(NEWSAPI_URL, params=params)
 
         if response.status_code == 200:
             data = response.json()
@@ -131,6 +104,9 @@ def get_newsapi_articles(country, language, query="", max_pages=5):
 
 def save_articles_to_mongo(articles):
     count = 0
+    if not articles:
+        print("⚠️ Aucun article à sauvegarder.")
+        return
     for a in articles:
         if not collection.find_one({"url": a["url"]}):
             collection.insert_one(a)
@@ -259,26 +235,127 @@ TOPICS_BY_COUNTRY = {
 def run_country_specific_scraping():
     for country, (lang, query) in TOPICS_BY_COUNTRY.items():
         print(f"\n🌍 Récupération des articles pour {country} [{lang}] avec les mots-clés : {query}")
-        articles = get_articles(query=query, language=lang, page_size=5)
+        articles = get_newsapi_articles(country=country, language=lang, query=query, max_pages=5)
         save_articles_to_mongo(articles)
 
 def run_general_theme_scraping():
     for theme in THEMES:
         for lang in LANGUAGES:
             print(f"\n📰 Recherche générale : thème '{theme}' en [{lang}]")
-            articles = get_articles(query=theme, language=lang, page_size=5)
+            articles = get_newsapi_articles(country="", language=lang, query=theme, max_pages=1)
             save_articles_to_mongo(articles)
 
-if __name__ == "__main__":
-    print("=== Scraping par pays ciblés ===")
-    run_country_specific_scraping()
+#Création d’un DataFrame depuis MongoDB
+def get_articles_dataframe():
+    cursor = collection.find({"emotion": {"$exists": True}})
+    articles = list(cursor)
+    df = pd.DataFrame(articles)
 
-    print("\n=== Scraping général multi-thèmes / multi-langues ===")
-    run_general_theme_scraping()
+    # Nettoyage et formatage des colonnes utiles
+    df = df[["pays", "emotion", "score_emotion", "tags", "timestamp"]].copy()
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date.astype(str)
+    df["nb_articles"] = 1
+    df.rename(columns={"pays": "country", "tags": "theme"}, inplace=True)
+    return df
 
-    annotate_articles_with_emotions()
-    plot_emotions()
+def export_cleaned_articles():
+    cursor = collection.find({"emotion": {"$exists": True}})
+    articles = list(cursor)
+    with open("cleaned_articles.json", "w", encoding="utf-8") as f:
+        json.dump(articles, f, ensure_ascii=False, indent=2)
 
+st.button("Lancer le scraping")
+run_country_specific_scraping()
+run_general_theme_scraping()
+
+# === Interface Streamlit
+st.set_page_config(layout="wide")
+st.title("🌍 WorldMood - Analyse émotionnelle de la presse mondiale")
+
+# === Chargement des données ===
+@st.cache_data
+def load_data():
+    with open("cleaned_articles.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return pd.DataFrame(data)
+
+@st.cache_resource
+def load_emotion_model():
+    return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=1)
+
+# === Analyse émotionnelle locale (si besoin) ===
+def analyze_emotions(df, emotion_analyzer):
+    if "timestamp" not in df.columns:
+        df["timestamp"] = datetime.utcnow().isoformat()
+    
+    if "theme" not in df.columns:
+        df["theme"] = "inconnu"
+
+    df = df.copy()
+    if "emotion" not in df.columns:
+        df["emotion"] = df["content"].apply(lambda text: emotion_analyzer(text[:512])[0]["label"] if text else "unknown")
+    df["year"] = pd.to_datetime(df["timestamp"]).dt.year
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date.astype(str)
+    df["nb_articles"] = 1
+    return df
+
+# === Visualisations ===
+def bubble_map(df, selected_theme, year):
+    filtered = df[(df["theme"] == selected_theme) & (df["year"] == year)]
+    emotion_counts = filtered.groupby(["country", "emotion"]).size().reset_index(name="count")
+    emotion_summary = emotion_counts.groupby("country")["count"].sum().reset_index()
+
+    fig = px.scatter_geo(
+        emotion_summary,
+        locations="country",
+        locationmode="country names",
+        size="count",
+        projection="natural earth",
+        title=f"Distribution des émotions pour le thème '{selected_theme}' en {year}"
+    )
+    return fig
+
+def contour_plot(df, countries, selected_theme, year_range):
+    filtered = df[(df["theme"] == selected_theme) &
+                  (df["country"].isin(countries)) &
+                  (df["year"].between(*year_range))]
+    
+    grouped = filtered.groupby(["year", "country", "emotion"]).size().reset_index(name="count")
+    pivot = grouped.pivot_table(index="year", columns=["country", "emotion"], values="count", fill_value=0)
+    
+    z = pivot.values
+    x = pivot.index.values
+    y = [f"{col[0]}-{col[1]}" for col in pivot.columns]
+
+    fig = go.Figure(data=go.Contour(z=z, x=x, y=y, colorscale="Viridis", contours_coloring='heatmap'))
+    fig.update_layout(title="Évolution des émotions par pays et par année",
+                      xaxis_title="Année", yaxis_title="Pays-Émotion")
+    return fig
+
+# === MAIN ===
+raw_data = load_data()
+emotion_pipeline = load_emotion_model()
+data = analyze_emotions(raw_data, emotion_pipeline)
+
+# === Sidebar ===
+theme = st.sidebar.selectbox("🎯 Choisissez un thème", sorted(data["theme"].unique()))
+years = sorted(data["year"].dropna().unique())
+year = st.sidebar.selectbox("🗓️ Année pour la carte à bulles", years)
+year_range = st.sidebar.slider("⏳ Plage d'années pour comparaison", int(min(years)), int(max(years)), (int(min(years)), int(max(years))))
+
+# === Graph 1 ===
+st.subheader("📍 Carte mondiale des émotions")
+st.plotly_chart(bubble_map(data, theme, year), use_container_width=True)
+
+# === Graph 2 ===
+st.subheader("📈 Comparaison temporelle par pays")
+countries = st.multiselect("Choisissez jusqu’à 3 pays", sorted(data["country"].unique()), max_selections=3)
+if countries:
+    st.plotly_chart(contour_plot(data, countries, theme, year_range), use_container_width=True)
+
+if st.sidebar.button("💾 Exporter en JSON"):
+    export_cleaned_articles()
+    st.success("✅ Export vers cleaned_articles.json terminé.")
 
 
 

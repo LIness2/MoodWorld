@@ -1,5 +1,6 @@
 import pandas as pd
 import plotly.express as px
+from dash import Dash, dcc, html, Input, Output
 
 # Données exemple
 data = {
@@ -20,27 +21,49 @@ emotion_colors = {
     "surprise": "orange"
 }
 
-# Création du graphique en barres
-fig = px.bar(
-    df,
-    x="country",
-    y="count",
-    color="emotion",
-    facet_col="theme",
-    color_discrete_map=emotion_colors,
-    title="Émotion dominante par thème et par pays",
-    labels={
-        "country": "Pays",
-        "count": "Nombre d’articles",
-        "emotion": "Émotion dominante",
-        "theme": "Thème"
-    },
-    hover_data={"emotion": True, "count": True}
-)
+# Création de l'app Dash
+app = Dash(__name__)
 
-fig.update_layout(
-    height=500,
-    template="plotly_white"
-)
+# Layout de l'application
+app.layout = html.Div([
+    html.H2("Analyse des émotions dominantes par thème et pays"),
+    
+    html.Label("Choisissez un thème :"),
+    dcc.Dropdown(
+        id='theme-dropdown',
+        options=[{"label": theme, "value": theme} for theme in df["theme"].unique()],
+        value=df["theme"].unique()[0]  # Thème sélectionné par défaut
+    ),
+    
+    dcc.Graph(id='emotion-graph')
+])
 
-fig.show()
+# Callback pour mettre à jour le graphique selon le thème sélectionné
+@app.callback(
+    Output("emotion-graph", "figure"),
+    Input("theme-dropdown", "value")
+)
+def update_graph(selected_theme):
+    filtered_df = df[df["theme"] == selected_theme]
+    
+    fig = px.bar(
+        filtered_df,
+        x="country",
+        y="count",
+        color="emotion",
+        color_discrete_map=emotion_colors,
+        title=f"Émotions dominantes dans le thème : {selected_theme}",
+        labels={
+            "country": "Pays",
+            "count": "Nombre d’articles",
+            "emotion": "Émotion dominante"
+        },
+        hover_data={"emotion": True, "count": True}
+    )
+    
+    fig.update_layout(template="plotly_white", height=500)
+    return fig
+
+# Lancement du serveur
+if __name__ == '__main__':
+    app.run(debug=True)

@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- Connexion MongoDB ---
 client = pymongo.MongoClient("mongodb://localhost:27017/")
-db = client["world_mood"]  # Correction : nom de la base conforme à app.py
+db = client["articles_db"] 
 collection = db["articles"]
 
 from transformers import pipeline

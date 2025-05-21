@@ -1,3 +1,6 @@
+import streamlit as st
+# set_page_config must be the first Streamlit command
+st.set_page_config(layout="wide")
 from flask import Flask, render_template
 from code_final import annotate_articles_with_emotions, save_articles_to_mongo, plot_emotions
 from pymongo import MongoClient
@@ -66,6 +69,11 @@ def stats():
         print(f"❌ Erreur dans la génération des stats : {e}")
         labels = []
         values = []
+
+    return render_template("stats.html", labels=labels, values=values)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
 
     return render_template("stats.html", labels=labels, values=values)
 

@@ -1,0 +1,92 @@
+import streamlit as st
+import pandas as pd
+import pymongo
+import plotly.express as px
+from datetime import datetime
+
+# Configuration de la page Streamlit
+st.set_page_config(page_title="WorldMood - Analyse des Émotions", layout="wide")
+
+# --- Connexion MongoDB ---
+client = pymongo.MongoClient("mongodb://localhost:27017/")
+db = client["articles_db"]
+collection = db["articles"]
+
+# --- Récupération des données ---
+documents = list(collection.find({"emotion": {"$exists": True}}))
+st.sidebar.success(f"📰 {len(documents)} articles annotés chargés.")
+
+# --- Nettoyage & Transformation ---
+data = []
+for doc in documents:
+    emotion = doc.get("emotion")
+    country = doc.get("pays") or doc.get("lang") or "Inconnu"
+    theme = doc.get("tags", "Autre")
+    date_str = doc.get("publication_date")
+
+    try:
+        year = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ").year
+    except:
+        year = None
+
+    if emotion and theme:
+        data.append({
+            "theme": theme,
+            "country": country,
+            "emotion": emotion,
+            "year": year,
+            "count": 1
+        })
+
+df = pd.DataFrame(data)
+
+if df.empty:
+    st.error("❌ Aucune donnée à afficher. Vérifie que la base contient des émotions annotées.")
+    st.stop()
+
+# --- Agrégation ---
+df_grouped = df.groupby(["theme", "country", "emotion", "year"]).sum().reset_index()
+
+# --- Couleurs personnalisées ---
+emotion_colors = {
+    "joy": "yellow",
+    "sadness": "blue",
+    "anger": "red",
+    "fear": "purple",
+    "surprise": "orange",
+    "love": "pink",
+    "neutral": "grey"
+}
+
+# --- Interface utilisateur ---
+st.title("🌍 WorldMood – Visualisation des émotions")
+
+selected_theme = st.selectbox(
+    "🎯 Choisissez un thème :",
+    sorted(df_grouped["theme"].unique())
+)
+
+filtered = df_grouped[df_grouped["theme"] == selected_theme]
+
+# --- Bar Chart ---
+fig_bar = px.bar(
+    filtered,
+    x="country",
+    y="count",
+    color="emotion",
+    color_discrete_map=emotion_colors,
+    title=f"📊 Nombre d’articles par émotion – Thème : {selected_theme}"
+)
+st.plotly_chart(fig_bar, use_container_width=True)
+
+# --- Bubble Chart ---
+fig_bubble = px.scatter(
+    filtered,
+    x="country",
+    y="year",
+    size="count",
+    color="emotion",
+    color_discrete_map=emotion_colors,
+    title=f"📈 Évolution temporelle des émotions – Thème : {selected_theme}"
+)
+st.plotly_chart(fig_bubble, use_container_width=True)

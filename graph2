@@ -14,7 +14,13 @@ client = pymongo.MongoClient(MONGO_URI)
 collection = client[DB_NAME][COLLECTION_NAME]
 
 # --- FILTRAGE DES DONNÉES ---
-articles = collection.find({"theme": theme})
+def get_cleaned_articles():
+    collection = db.articles_db
+    articles = list(collection.find({ "themes": { "$exists": True } }))
+    if not articles:
+        raise ValueError("Aucune donnée nettoyée trouvée dans MongoDB.")
+    return articles
+
 
 # --- EXTRACTION DES DONNÉES ---
 data = []
@@ -67,4 +73,4 @@ else:
         template="plotly_white"
     )
 
-    fig.show() moi je veux executer ce code
+    fig.show() 

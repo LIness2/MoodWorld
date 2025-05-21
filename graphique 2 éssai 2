@@ -1,0 +1,62 @@
+from pymongo import MongoClient
+import pandas as pd
+import plotly.express as px
+
+# Connexion MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["local"]
+collection = db["articles_db"]
+
+# Paramètres
+annee = 2025
+theme = "culture"
+pays_selection = ["FR", "US", "DE"]
+
+emotions = ["joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral"]
+
+data = []
+
+for pays in pays_selection:
+    articles = collection.find({
+        "tags": theme,
+        "pays": pays,
+        "publication_date": {"$regex": f"^{annee}"}
+    })
+    
+    counts = {e: 0 for e in emotions}
+    
+    for article in articles:
+        emotion = article.get("emotion")
+        if emotion in emotions:
+            counts[emotion] += 1
+            
+    for emotion in emotions:
+        data.append({
+            "Pays": pays,
+            "Emotion": emotion,
+            "Nombre d'articles": counts[emotion]
+        })
+
+df = pd.DataFrame(data)
+
+fig = px.bar(
+    df,
+    x="Pays",
+    y="Nombre d'articles",
+    color="Emotion",
+    category_orders={"Emotion": emotions},
+    title=f"Répartition des émotions par pays – Thème '{theme}' ({annee})",
+    labels={"Nombre d'articles": "Nombre d'articles", "Pays": "Pays"},
+    barmode="stack",
+    color_discrete_map={
+        "joy": "#FFD97D",
+        "sadness": "#A3BFD9",
+        "anger": "#F7A9A8",
+        "fear": "#C1A3D1",
+        "surprise": "#FFCBA4",
+        "disgust": "#A4C9A4",
+        "neutral": "#CFCFCF"
+    }
+)
+
+fig.show()

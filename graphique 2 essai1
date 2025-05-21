@@ -1,0 +1,117 @@
+from pymongo import MongoClient
+import pandas as pd
+import plotly.express as px
+from dash import Dash, dcc, html, Input, Output
+
+# Connexion MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["local"]
+collection = db["articles_db"]
+
+# Liste complète des émotions
+emotions = ["joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral"]
+
+# Récupérer les thèmes disponibles dans la base
+def get_themes():
+    return collection.distinct("tags")
+
+# Récupérer les pays disponibles dans la base
+def get_pays():
+    return collection.distinct("pays")
+
+app = Dash(__name__)
+
+app.layout = html.Div([
+    html.H1("Comparaison des émotions par pays, thème et année"),
+
+    html.Label("Choisir le thème :"),
+    dcc.Dropdown(
+        id="theme-dropdown",
+        options=[{"label": t, "value": t} for t in get_themes()],
+        value="culture",
+        clearable=False,
+    ),
+
+    html.Label("Choisir 3 pays :"),
+    dcc.Dropdown(
+        id="pays-dropdown",
+        options=[{"label": p, "value": p} for p in get_pays()],
+        value=["FR", "US", "DE"],
+        multi=True,
+        clearable=False,
+        maxHeight=200
+    ),
+
+    html.Label("Choisir l'année :"),
+    dcc.Slider(
+        id="annee-slider",
+        min=2015,
+        max=2025,
+        step=1,
+        value=2025,
+        marks={y: str(y) for y in range(2015, 2026)},
+        tooltip={"placement": "bottom", "always_visible": True}
+    ),
+
+    dcc.Graph(id="graph-emotions")
+])
+
+@app.callback(
+    Output("graph-emotions", "figure"),
+    Input("theme-dropdown", "value"),
+    Input("pays-dropdown", "value"),
+    Input("annee-slider", "value")
+)
+def update_graph(theme, pays_selection, annee):
+    if not pays_selection or len(pays_selection) != 3:
+        # Empêche l'affichage si moins de 3 pays sélectionnés
+        return px.bar(title="Veuillez sélectionner exactement 3 pays.")
+
+    data = []
+
+    for pays in pays_selection:
+        articles = collection.find({
+            "tags": theme,
+            "pays": pays,
+            "publication_date": {"$regex": f"^{annee}"}
+        })
+        
+        counts = {e: 0 for e in emotions}
+        
+        for article in articles:
+            emotion = article.get("emotion")
+            if emotion in emotions:
+                counts[emotion] += 1
+                
+        for emotion in emotions:
+            data.append({
+                "Pays": pays,
+                "Emotion": emotion,
+                "Nombre d'articles": counts[emotion]
+            })
+
+    df = pd.DataFrame(data)
+
+    fig = px.bar(
+        df,
+        x="Pays",
+        y="Nombre d'articles",
+        color="Emotion",
+        category_orders={"Emotion": emotions},
+        title=f"Répartition des émotions par pays – Thème '{theme}' ({annee})",
+        labels={"Nombre d'articles": "Nombre d'articles", "Pays": "Pays"},
+        barmode="stack",
+        color_discrete_map={
+            "joy": "#FFD97D",
+            "sadness": "#A3BFD9",
+            "anger": "#F7A9A8",
+            "fear": "#C1A3D1",
+            "surprise": "#FFCBA4",
+            "disgust": "#A4C9A4",
+            "neutral": "#CFCFCF"
+        }
+    )
+    return fig
+
+if __name__ == "__main__":
+    app.run(debug=True)

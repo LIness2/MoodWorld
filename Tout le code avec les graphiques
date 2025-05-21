@@ -148,11 +148,15 @@ def detect(text):
         score = round(sorted_res[0]["score"], 3)
     return label, score
 
+
+print("Nombre d'articles sans émotion :", collection.count_documents({"emotion": {"$exists": False}}))
+print("Nombre total d'articles :", collection.count_documents({}))
+
 def annotate_articles_with_emotions():
     for article in collection.find({"emotion": {"$exists": False}}):
         original_text = article.get("content") or article.get("description") or ""
         if not original_text:
-            continue
+            pass  # Replace 'continue' with 'pass' or handle the logic appropriately
 
         lang = article.get("lang", "en")
         translated_text = translate_to_english(original_text, source_lang=lang)
@@ -181,6 +185,28 @@ def annotate_articles_with_emotions():
             }}
         )
         print(f"✅ {emotion_label} ({lang} ➜ en | {pays}) - {article['title']}")
+    nb = 0
+    for article in collection.find():
+        original_text = article.get("content") or article.get("description") or ""
+        if not original_text:
+            continue
+    lang = article.get("lang", "en")
+    translated_text = translate_to_english(original_text, source_lang=lang)
+    if not translated_text.strip():
+        pass
+    emotion_label, emotion_score = detect(translated_text)
+    if emotion_label:
+        collection.update_one(
+            {"_id": article["_id"]},
+            {"$set": {
+                "emotion": emotion_label,
+                "score_emotion": emotion_score,
+                "translated_text": translated_text
+            }}
+        )
+
+print("✅ Articles avec émotion :", collection.count_documents({"emotion": {"$exists": True}}))
+
 
 # === MODEL TRAINING ===
 def train_custom_model(texts, labels, model_name="distilbert-base-uncased"):
@@ -199,15 +225,24 @@ def train_custom_model(texts, labels, model_name="distilbert-base-uncased"):
     model.save_pretrained("./emotion_model")
     tokenizer.save_pretrained("./emotion_model")
 
+articles = []  # Initialize articles as an empty list
+print("Nombre d'articles : ", len(articles))
+for a in articles:
+    print("Emotions : ", a.get("emotions"))
+
 # === VISUALISATION ===
 def plot_emotions():
     emotions = [a["emotion"] for a in collection.find({"emotion": {"$exists": True}})]
+    print(f"📊 Emotions trouvées : {emotions}")  # Ajout de ce print
+    if not emotions:
+        raise ValueError("Aucune donnée à afficher. Vérifie que la base contient des émotions annotées.")
     counts = Counter(emotions)
     plt.bar(counts.keys(), counts.values(), color="orange")
     plt.title("Distribution des émotions")
     plt.xlabel("Émotion")
     plt.ylabel("Articles")
     plt.show()
+
 
 def show_articles_by_emotion(emotion):
     print(f"\nArticles avec l'émotion : {emotion}")
@@ -461,6 +496,5 @@ else:
 if st.sidebar.button("💾 Exporter en JSON"):
     export_cleaned_articles()  # Facultatif si tu veux éviter le fichier JSON
     st.success("✅ Export vers cleaned_articles.json terminé.")
-
 
 

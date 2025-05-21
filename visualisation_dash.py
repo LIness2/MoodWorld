@@ -9,6 +9,32 @@ client = pymongo.MongoClient("mongodb://localhost:27017/")
 db = client["world_mood"]  # Correction : nom de la base conforme à app.py
 collection = db["articles"]
 
+from transformers import pipeline
+def load_emotion_model():
+    return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=False)
+
+def analyze_emotions(df, emotion_analyzer):
+    df = df.copy()
+    if "emotion" not in df.columns:
+        if "content" in df.columns:
+            df["emotion"] = df["content"].apply(
+                lambda text: emotion_analyzer(text[:512])[0]["label"] if text else "unknown"
+            )
+        else:
+            df["emotion"] = "unknown"
+    return df
+
+# visualisation_dash.py
+
+from dash import Dash
+from flask import Flask
+
+def create_dash_app(flask_app):
+    # tout ton code Dash ici...
+    dash_app = Dash(__name__, server=flask_app, url_base_pathname="/dash/")
+    # Layout, callbacks...
+    return dash_app
+
 # --- Récupération des données ---
 documents = list(collection.find({"emotion": {"$exists": True}}))
 print(f"Nombre d'articles avec émotion : {len(documents)}")

@@ -1,5 +1,5 @@
 from flask import Flask, render_template
-from final2 import annotate_articles_with_emotions, fetch_articles, save_articles_to_mongo, plot_emotions
+from code_final import annotate_articles_with_emotions, save_articles_to_mongo, plot_emotions
 from pymongo import MongoClient
 
 # Création de l'app Flask
@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 # Connexion à MongoDB
 client = MongoClient("mongodb://localhost:27017/")
-db = client["world_mood"]
+db = client["articles_db"]
 collection = db["articles"]
 
 # Import et création de l'app Dash intégrée
@@ -71,3 +71,4 @@ def stats():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+

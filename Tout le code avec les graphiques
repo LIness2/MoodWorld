@@ -1,6 +1,8 @@
+import streamlit as st
+# set_page_config must be the first Streamlit command
+st.set_page_config(layout="wide")
 import requests
 import pandas as pd
-import streamlit as st
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
 from collections import Counter
@@ -73,51 +75,71 @@ def translate_to_english(text, source_lang):
 
 
 # Récupérer les articles depuis NewsAPI en paginant
-def get_newsapi_articles(country, language, query="", max_pages=5):
-    print(f"\n📰 NewsAPI - Articles pour {country} ({language})")
-
-    total_articles = 0  # <- Il faut initialiser cette variable avant la boucle
+def get_newsapi_articles(language="", query="", from_param=None, to_param=None, max_pages=5):
+    all_articles = []
     params = {
-        "q": query,
+        "q": query or "*",
         "language": language,
-        "pageSize": 10,
+        "pageSize": 100,
         "apiKey": NEWSAPI_KEY
     }
-    all_articles = []
+
+    if from_param:
+        params["from"] = from_param
+    if to_param:
+        params["to"] = to_param
+
     for page in range(1, max_pages + 1):
         params["page"] = page
         response = requests.get(NEWSAPI_URL, params=params)
 
-        if response.status_code == 200:
-            data = response.json()
-            articles = data.get("articles", [])
-            all_articles.extend(articles)
-            if not articles:
-                break
-
-            for article in articles:
-                print(f"📌 {article['title']} ({article['source']['name']})")
-                print(f"🔗 {article['url']}\n")
-                total_articles += 1
-        else:
+        if response.status_code != 200:
             print(f"❌ Erreur {response.status_code}: {response.text}")
             break
-    return all_articles 
-   
-    if total_articles == 0:
-        print("❌ Aucun article trouvé.")
 
+        data = response.json()
+        articles = data.get("articles", [])
+        if not articles:
+            break
+        all_articles.extend(articles)
 
+    return all_articles
+
+# === Insertion MongoDB avec vérification doublons
 def save_articles_to_mongo(articles):
     count = 0
-    if not articles:
-        print("⚠️ Aucun article à sauvegarder.")
-        return
     for a in articles:
-        if not collection.find_one({"url": a["url"]}):
+        if "url" in a and not collection.find_one({"url": a["url"]}):
+            # Ajout d'un champ publication_date simplifié (YYYY-MM-DD)
+            if a.get("publishedAt"):
+                a["publication_date"] = a["publishedAt"][:10]
+            a["inserted_at"] = datetime.now()
             collection.insert_one(a)
             count += 1
-    print(f"{count} article(s) ajouté(s) dans MongoDB.")
+    print(f"✅ {count} article(s) ajouté(s) dans MongoDB.")
+
+# === Téléchargement multi-années
+def download_by_years(start_year=2004, end_year=2025, language="", query=""):
+    for year in range(start_year, end_year + 1):
+        print(f"\n🔎 Traitement de l'année {year}...")
+        from_date = f"{year}-01-01"
+        to_date = f"{year}-12-31"
+
+        articles = get_newsapi_articles(
+            language=language,
+            query=query,
+            from_param=from_date,
+            to_param=to_date,
+            max_pages=5
+        )
+
+        print(f"📦 {len(articles)} article(s) récupéré(s) pour {year}.")
+        save_articles_to_mongo(articles)
+
+    # Vérification des années insérées
+    inserted_years = collection.distinct("publication_date")
+    clean_years = sorted(set([d[:4] for d in inserted_years if d]))
+    print(f"\n📅 Années couvertes dans MongoDB : {clean_years}")
 
 # === EMOTIONS ===
 def detect_emotion_custom(text):
@@ -388,6 +410,9 @@ if not articles:
 
 df_raw = pd.DataFrame(articles)
 st.write("🧪 Colonnes disponibles :", df_raw.columns.tolist())
+# Harmonisation des noms de colonnes
+if "pays" in df_raw.columns:
+    df_raw.rename(columns={"pays": "country"}, inplace=True)
 
 # === Normalisation des colonnes
 df_raw["country"] = df_raw.get("pays", "Inconnu")
@@ -419,27 +444,32 @@ selected_countries = st.sidebar.multiselect("🌐 Pays à comparer", available_c
 selected_theme = st.sidebar.selectbox("🎯 Thème à analyser", available_themes)
 
 # === Plage d'années à comparer
-year_range = st.sidebar.slider(
-    "⏳ Plage d'années (max 2)",
-    min_value=int(min(available_years)),
-    max_value=int(max(available_years)),
-    value=(int(min(available_years)), int(max(available_years))),
-    step=1
-)
+if len(available_years) > 1:
+    year_range = st.sidebar.slider(
+        "⏳ Plage d'années (max 2)",
+        min_value=int(min(available_years)),
+        max_value=int(max(available_years)),
+        value=(int(min(available_years)), int(max(available_years))),
+        step=1
+    )
+    # === Curseur pour se déplacer entre les deux années sélectionnées
+    selected_year = st.sidebar.slider(
+        "📅 Choisissez une année à afficher",
+        min_value=year_range[0],
+        max_value=year_range[1],
+        value=year_range[0],
+        step=1
+    )
+else:
+    year_range = (int(available_years[0]), int(available_years[0]))
+    selected_year = int(available_years[0])
+    st.sidebar.info(f"📅 Une seule année disponible : {available_years[0]}")
 
 # Vérification
 if year_range[1] - year_range[0] > 1:
     st.warning("🚨 Veuillez sélectionner au plus deux années consécutives.")
     st.stop()
 
-# === Curseur pour se déplacer entre les deux années sélectionnées
-selected_year = st.sidebar.slider(
-    "📅 Choisissez une année à afficher",
-    min_value=year_range[0],
-    max_value=year_range[1],
-    value=year_range[0],
-    step=1
-)
 st.sidebar.markdown(f"📊 Affichage des données pour l'année **{selected_year}**")
 
 # === Filtrage des données
@@ -476,10 +506,9 @@ def analyze_emotions(df, emotion_analyzer):
     df["nb_articles"] = 1
     return df
 
-
-# Ensuite tu peux appeler tes fonctions de visualisation avec :
-# fig = contour_plot(df_raw, selected_countries, selected_theme, year_range)
-# st.plotly_chart(fig, use_container_width=True)
+if "country" not in df_raw.columns:
+    st.error("La colonne 'country' est manquante dans les données.")
+    st.stop()
 
 # === Visualisations ===
 def bubble_map(df, selected_theme, year):
@@ -567,26 +596,4 @@ else:
 # === Graph 1 ===
 st.subheader("📍 Carte mondiale des émotions")
 st.plotly_chart(bubble_map(df_raw, theme, year), use_container_width=True)
-
-# === Graph 2 ===
-st.subheader("📈 Comparaison temporelle par pays")
-if "country" in df_raw.columns:
-    countries = st.multiselect(
-        "Choisissez jusqu’à 3 pays", 
-        sorted(df_raw["country"].dropna().unique()), 
-        max_selections=3
-    )
-    if countries:
-        st.plotly_chart(contour_plot(df_raw, countries, theme, year_range), use_container_width=True)
-else:
-    st.warning("Les données ne contiennent pas de pays.")
-
-# === Export JSON (si utile)
-if st.sidebar.button("💾 Exporter en JSON"):
-    try:
-        with open("articles.json", "w") as f:
-            json.dump(raw_data, f)
-        st.success("Données exportées avec succès !")
-    except Exception as e:
-        st.error(f"Erreur lors de l'exportation : {e}")     
 

@@ -52,6 +52,17 @@ client = MongoClient("mongodb://localhost:27017/")
 db = client["articles_db"]
 collection = db["articles"]
 
+# 🔁 Étape unique : convertir "country" -> "pays" si besoin
+def migrate_country_to_pays():
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["articles_db"]
+    collection = db["articles"]
+    result = collection.update_many(
+        {"country": {"$exists": True}},
+        [{"$set": {"pays": "$country"}}, {"$unset": "country"}]
+    )
+    print(f"🛠️ Migration terminée : {result.modified_count} article(s) mis à jour (country ➜ pays)")
+
 # === TRADUCTION ===
 def translate_to_english(text, source_lang):
     if not text or source_lang == "en":
@@ -243,11 +254,13 @@ def get_cleaned_articles():
     client = MongoClient("mongodb://localhost:27017/")
     db = client["articles_db"]
     collection = db["articles"]
+    migrate_country_to_pays() # Migration des pays
+    
     cleaned_data = []
     for article in collection.find({"emotion": {"$exists": True, "$ne": None}}):
         cleaned_article = {
             "_id": str(article["_id"]),
-            "country": article.get("country", "Unknown"),
+            "country": article.get("pays", "Unknown"),
             "emotion": article.get("emotion", "neutral"),
             "score_emotion": float(article.get("score_emotion", 0)),
             "theme": article.get("theme", "unknown"),
@@ -295,7 +308,6 @@ EMOTION_COLOR_MAP = {
 import plotly.express as px
 import pycountry
 
-import pycountry
 
 def get_iso_alpha3(country_name):
     try:

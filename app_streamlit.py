@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from final2 import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
+import plotly.express as px
+from code_final import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
 from pymongo import MongoClient
 
 # Connexion MongoDB
@@ -60,7 +61,7 @@ emotions = ["joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral"]
 # Récupération des pays
 pays_list = collection.distinct("pays")
 
-st.title("Comparaison des émotions par pays et année")
+st.title("Comparaison des émotions par pays")
 
 selected_countries = st.multiselect(
     "Choisir 3 pays :", pays_list, default=pays_list[:3]
@@ -73,9 +74,7 @@ else:
 
     for pays in selected_countries:
         articles = collection.find({
-            "tags": selected_theme,
-            "pays": pays,
-            "publication_date": {"$regex": f"^{selected_year}"}
+            "pays": pays
         })
 
         counts = {e: 0 for e in emotions}
@@ -100,7 +99,7 @@ else:
         color="Emotion",
         category_orders={"Emotion": emotions},
         barmode="stack",
-        title=f"Émotions par pays – Thème '{selected_theme}' ({selected_year})",
+        title=f"Émotions par pays,",
         color_discrete_map={
             "joy": "#E1BB60",
             "sadness": "#6998C5",
@@ -108,9 +107,10 @@ else:
             "fear": "#C49DD9",
             "surprise": "#E09F6D",
             "disgust": "#3B9A3B",
-             "neutral": "#CFCFCF"
+             "neutral": "#ADA7A7"
         }
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
 

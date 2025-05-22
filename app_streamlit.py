@@ -101,13 +101,13 @@ else:
         barmode="stack",
         title=f"Émotions par pays,",
         color_discrete_map={
-            "joy": "#E1BB60",
-            "sadness": "#6998C5",
-            "anger": "#D84644",
-            "fear": "#C49DD9",
-            "surprise": "#E09F6D",
-            "disgust": "#3B9A3B",
-             "neutral": "#ADA7A7"
+            "joy": "#E1952B",
+            "sadness": "#4282BD",
+            "anger": "#AD211F",
+            "fear": "#AB6FCB",
+            "surprise": "#E15F88",
+            "disgust": "#0E7B0E",
+             "neutral": "#AE9F9F"
         }
     )
 

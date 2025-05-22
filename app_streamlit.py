@@ -8,7 +8,7 @@ client = MongoClient("mongodb://localhost:27017/")
 db = client["articles_db"]
 collection = db["articles"]
 def main():
-    st.title("Carte des émotions")
+    st.title("WorldMood – Analyse et visualisation des émotions")
 
     # Charger les articles depuis MongoDB
     articles = get_cleaned_articles()

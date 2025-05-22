@@ -1,0 +1,639 @@
+import streamlit as st
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+from pymongo import MongoClient
+from collections import Counter
+from datasets import Dataset
+from sklearn.model_selection import train_test_split
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline)
+from datetime import datetime
+import geocoder
+from deep_translator import GoogleTranslator
+import warnings
+warnings.filterwarnings("ignore")
+import re
+import nltk
+nltk.download('stopwords')  # 👈 à exécuter une fois
+from nltk.corpus import stopwords #temporairement
+stop_words = set(stopwords.words('french'))
+import os
+print("Répertoire courant :", os.getcwd())
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import json
+from bson.json_util import dumps
+from datetime import datetime
+
+
+# === CONFIGURATION ===
+NEWSAPI_URL = "https://newsapi.org/api/v4/Everything"
+NEWSAPI_KEY = "5cc959f32-de5449ea982ea306e99cd0d"
+USE_CUSTOM_MODEL = False  # Toggle modèle personnalisé
+
+# === CHARGEMENT DES PIPELINES ===
+emotion_pipeline =  pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", return_all_scores=True)
+
+try:
+    custom_model = pipeline("text-classification", model="./emotion_model", tokenizer="./emotion_model")
+except:
+    custom_model = None
+
+# === OUTILS NLP pour le nettoyage ===
+tokenizer_cleaner = AutoTokenizer.from_pretrained("camembert-base")
+
+stop_words = set(stopwords.words('french'))  # adapter à la langue
+
+def clean_text(text):
+    # passage en minuscules
+    text = text.lower()
+    # suppression ponctuation et caractères non alphabétiques
+    text = re.sub(r'[^a-zàâçéèêëîïôûùüÿñæœ\s]', '', text)
+    # tokenization simple par espaces
+    tokens = text.split()
+    # suppression stopwords
+    tokens = [t for t in tokens if t not in stop_words]
+    # tu peux aussi utiliser tokenizer_cleaner.tokenize si tu veux
+    return " ".join(tokens)
+
+# === MONGODB ===
+client = MongoClient("mongodb://localhost:27017/")
+db = client["articles_db"]
+collection = db["articles"]
+
+# === TRADUCTION ===
+def translate_to_english(text, source_lang):
+    if not text or source_lang == "en":
+        return text
+    try:
+        return GoogleTranslator(source=source_lang, target='en').translate(text)
+    except:
+        return text  # fallback: return as is
+
+
+# Récupérer les articles depuis NewsAPI en paginant
+def get_newsapi_articles(language="", query="", from_param=None, to_param=None, max_pages=5):
+    all_articles = []
+    params = {
+        "q": query or "*",
+        "language": language,
+        "pageSize": 100,
+        "apiKey": NEWSAPI_KEY
+    }
+
+    if from_param:
+        params["from"] = from_param
+    if to_param:
+        params["to"] = to_param
+
+    for page in range(1, max_pages + 1):
+        params["page"] = page
+        response = requests.get(NEWSAPI_URL, params=params)
+
+        if response.status_code != 200:
+            print(f"❌ Erreur {response.status_code}: {response.text}")
+            break
+
+        data = response.json()
+        articles = data.get("articles", [])
+        if not articles:
+            break
+        all_articles.extend(articles)
+
+    return all_articles
+
+# === Insertion MongoDB avec vérification doublons
+def save_articles_to_mongo(articles):
+    count = 0
+    for a in articles:
+        if "url" in a and not collection.find_one({"url": a["url"]}):
+            # Ajout d'un champ publication_date simplifié (YYYY-MM-DD)
+            if a.get("publishedAt"):
+                a["publication_date"] = a["publishedAt"][:10]
+            a["inserted_at"] = datetime.now()
+            collection.insert_one(a)
+            count += 1
+    print(f"✅ {count} article(s) ajouté(s) dans MongoDB.")
+
+# === Téléchargement multi-années
+def download_by_years(start_year=2024, end_year=2025, language="", query=""):
+    for year in range(start_year, end_year + 1):
+        print(f"\n🔎 Traitement de l'année {year}...")
+        from_date = f"{year}-01-01"
+        to_date = f"{year}-12-31"
+
+        articles = get_newsapi_articles(
+            language=language,
+            query=query,
+            from_param=from_date,
+            to_param=to_date,
+            max_pages=5
+        )
+
+        print(f"📦 {len(articles)} article(s) récupéré(s) pour {year}.")
+        save_articles_to_mongo(articles)
+
+    # Vérification des années insérées
+    inserted_years = collection.distinct("publication_date")
+    clean_years = sorted(set([d[:4] for d in inserted_years if d]))
+    print(f"\n📅 Années couvertes dans MongoDB : {clean_years}")
+
+# === EMOTIONS ===
+def detect_emotion_custom(text):
+    if custom_model is None:
+        raise ValueError("Le modèle personnalisé n'est pas chargé.")
+    return max(custom_model(text[:512]), key=lambda x: x['score'])["label"]
+
+def detect_emotion(text):
+    result = emotion_pipeline(text[:512])[0]
+    return max(result, key=lambda x: x["score"])["label"]
+
+def detect(text):
+    if USE_CUSTOM_MODEL:
+        if custom_model is not None:
+            label = detect_emotion_custom(text)
+            score = None
+        else:
+            print("⚠️ Custom model non chargé, utilisation du modèle standard")
+            # fallback sur emotion_pipeline
+            result = emotion_pipeline(text[:512])[0]
+            sorted_res = sorted(result, key=lambda x: x["score"], reverse=True)
+            label = sorted_res[0]["label"]
+            score = round(sorted_res[0]["score"], 3)
+    else:
+        result = emotion_pipeline(text[:512])[0]
+        sorted_res = sorted(result, key=lambda x: x["score"], reverse=True)
+        label = sorted_res[0]["label"]
+        score = round(sorted_res[0]["score"], 3)
+    return label, score
+
+
+print("Nombre d'articles sans émotion :", collection.count_documents({"emotion": {"$exists": False}}))
+print("Nombre total d'articles :", collection.count_documents({}))
+
+def annotate_articles_with_emotions():
+    for article in collection.find({"emotion": {"$exists": False}}):
+        original_text = article.get("content") or article.get("description") or ""
+        if not original_text:
+            pass  # Replace 'continue' with 'pass' or handle the logic appropriately
+
+        lang = article.get("lang", "en")
+        translated_text = translate_to_english(original_text, source_lang=lang)
+
+        if not translated_text.strip():
+            continue
+
+        emotion_label, emotion_score = detect(translated_text)
+
+        couleur_map = {
+            "joy": "jaune", "sadness": "bleu", "anger": "rouge",
+            "fear": "violet", "love": "rose", "surprise": "orange"
+        }
+        couleur = couleur_map.get(emotion_label, "gris")
+        pays = geocoder.ip('me').country or "Inconnu"
+
+        collection.update_one(
+            {"_id": article["_id"]},
+            {"$set": {
+                "emotion": emotion_label,
+                "score_emotion": emotion_score,
+                "translated_text": translated_text,
+                "couleur": couleur,
+                "pays": pays,
+                "timestamp": datetime.utcnow().isoformat()
+            }}
+        )
+        print(f"✅ {emotion_label} ({lang} ➜ en | {pays}) - {article['title']}")
+    nb = 0
+    for article in collection.find():
+        original_text = article.get("content") or article.get("description") or ""
+        if not original_text:
+            continue
+    lang = article.get("lang", "en")
+    translated_text = translate_to_english(original_text, source_lang=lang)
+    if not translated_text.strip():
+        pass
+    emotion_label, emotion_score = detect(translated_text)
+    if emotion_label:
+        collection.update_one(
+            {"_id": article["_id"]},
+            {"$set": {
+                "emotion": emotion_label,
+                "score_emotion": emotion_score,
+                "translated_text": translated_text
+            }}
+        )
+
+print("✅ Articles avec émotion :", collection.count_documents({"emotion": {"$exists": True}}))
+
+
+# === MODEL TRAINING ===
+def train_custom_model(texts, labels, model_name="distilbert-base-uncased"):
+    df = pd.DataFrame({"text": texts, "label": labels})
+    df["cleaned_text"] = df["text"].apply(clean_text)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df["label"], random_state=42)
+    train_dataset = Dataset.from_pandas(train_df)
+    val_dataset = Dataset.from_pandas(val_df)
+    train_dataset = train_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    val_dataset = val_dataset.map(lambda b: tokenizer(b["cleaned_text"], padding=True, truncation=True), batched=True)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=len(set(labels)))
+    args = TrainingArguments(output_dir="./emotion_model", num_train_epochs=3, per_device_train_batch_size=4)
+    trainer = Trainer(model=model, args=args, train_dataset=train_dataset, eval_dataset=val_dataset, tokenizer=tokenizer)
+    trainer.train()
+    model.save_pretrained("./emotion_model")
+    tokenizer.save_pretrained("./emotion_model")
+
+articles = []  # Initialize articles as an empty list
+print("Nombre d'articles : ", len(articles))
+for a in articles:
+    print("Emotions : ", a.get("emotions"))
+
+# === VISUALISATION ===
+def plot_emotions():
+    emotions = [a["emotion"] for a in collection.find({"emotion": {"$exists": True}})]
+    print(f"📊 Emotions trouvées : {emotions}")  # Ajout de ce print
+    if not emotions:
+        raise ValueError("Aucune donnée à afficher. Vérifie que la base contient des émotions annotées.")
+    counts = Counter(emotions)
+    plt.bar(counts.keys(), counts.values(), color="orange")
+    plt.title("Distribution des émotions")
+    plt.xlabel("Émotion")
+    plt.ylabel("Articles")
+    plt.show()
+
+
+def show_articles_by_emotion(emotion):
+    print(f"\nArticles avec l'émotion : {emotion}")
+    for a in collection.find({"emotion": emotion}):
+        print(f"• {a['title']} ({a['source']})")
+
+# === CONFIGURATION MULTI-THEMES / MULTI-LANGUES ===
+# config.py
+THEMES = ["politique", "Ukraine", "Guerre", "culture", "économie", "Israël"]
+
+LANGUAGES = ["fr", "en", "de", "he", "ze", "en", "es", "it", "pt", "ru", "zh", "ar", "fa"]
+
+TOPICS_BY_COUNTRY = {
+    "France": ("fr", "politique OR économie OR Ukraine OR Israël"),
+    "USA": ("en", "election OR Trump OR economy OR Gaza"),
+    "Germany": ("de", "wirtschaft OR politik OR ukraine OR israel"),
+    "Israel": ("he", "נתניהו OR עזה OR פוליטיקה OR ביטחון"),
+    "China": ("zh", "政治 OR 经济 OR 台湾 OR 美国"),
+    "Russia": ("ru", "политика OR экономика OR Украина OR США"),
+    "Nigeria": ("en", "election OR Buhari OR economy OR conflict"),
+    "South Africa": ("en", "Ramaphosa OR politics OR economy OR BRICS"),
+    "Egypt": ("ar", "السيسي OR سياسة OR اقتصاد OR غزة"),
+    "Brazil": ("pt", "política OR economia OR Lula OR Bolsonaro"),
+    "India": ("en", "Modi OR BJP OR Kashmir OR economy"),
+    "Pakistan": ("en", "Imran Khan OR politics OR military OR Kashmir"),
+    "Iran": ("fa", "رئیسی OR سیاست OR اقتصاد OR اسرائیل"),
+    "Saudi Arabia": ("ar", "بن سلمان OR سياسة OR اقتصاد OR نفط")
+}
+# === SCRIPT PRINCIPAL ===
+
+def run_country_specific_scraping():
+    for country, (lang, query) in TOPICS_BY_COUNTRY.items():
+        print(f"\n🌍 Récupération des articles pour {country} [{lang}] avec les mots-clés : {query}")
+        articles = get_newsapi_articles(country=country, language=lang, query=query, max_pages=5)
+        save_articles_to_mongo(articles)
+
+def run_general_theme_scraping():
+    for theme in THEMES:
+        for lang in LANGUAGES:
+            print(f"\n📰 Recherche générale : thème '{theme}' en [{lang}]")
+            articles = get_newsapi_articles(country="", language=lang, query=theme, max_pages=1)
+            save_articles_to_mongo(articles)
+
+#Création d’un DataFrame depuis MongoDB
+def get_articles_dataframe():
+    cursor = collection.find({"emotion": {"$exists": True}})
+    articles = list(cursor)
+    df = pd.DataFrame(articles)
+
+    # Gestion du champ 'country' à partir de 'pays'
+    if "pays" in df.columns:
+        df["country"] = df["pays"]
+    else:
+        df["country"] = "Inconnu"
+
+    # Création ou vérification des autres colonnes utiles
+    df["theme"] = df.get("tags", "Inconnu")
+    df["score_emotion"] = df.get("score_emotion", 0)
+    df["emotion"] = df.get("emotion", "neutral")
+
+    # Formatage de la date
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df["date"] = df["timestamp"].dt.date.astype(str)
+    df["nb_articles"] = 1
+
+    # Filtrage des colonnes finales
+    df = df[["country", "emotion", "score_emotion", "theme", "timestamp", "date", "nb_articles"]]
+    return df
+
+
+# === Connexion à MongoDB et nettoyage des articles ===
+def parse_timestamp(ts):
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    try:
+        return datetime.fromisoformat(ts).isoformat()
+    except:
+        return datetime.now().isoformat()
+@st.cache_resource
+def get_cleaned_articles():
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["articles_db"]
+    collection = db["articles"]
+
+    cleaned_data = []
+    
+    for article in collection.find({"emotion": {"$exists": True, "$ne": None}}):
+        cleaned_article = {
+            "_id": str(article["_id"]),
+            "country": article.get("country", "Unknown"),
+            "emotion": article.get("emotion", "neutral"),
+            "score_emotion": float(article.get("score_emotion", 0)),
+            "theme": article.get("theme", "unknown"),
+            "timestamp": parse_timestamp(article.get("timestamp")),
+            "date": str(article.get("date", datetime.now().date())),
+            "nb_articles": 1
+        }
+        cleaned_data.append(cleaned_article)
+    if not cleaned_data:
+        raise ValueError("Aucune donnée nettoyée trouvée dans MongoDB.")
+    return cleaned_data
+
+# === Chargement du modèle d'émotion ===
+@st.cache_resource
+def load_emotion_model():
+    try:
+        return pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=1)
+    except Exception as e:
+        st.error(f"Erreur lors du chargement du modèle d'émotion : {e}")
+        return None
+    
+
+# Aperçu
+st.write(f"{len(articles)} articles annotés trouvés.")
+st.json(articles[:3])
+
+# === Interface Streamlit ===
+from utils import get_cleaned_articles, load_emotion_model
+# from ton_module_scraping import run_country_specific_scraping, run_general_theme_scraping
+
+st.set_page_config(layout="wide")
+st.title("🌍 WorldMood - Analyse émotionnelle de la presse mondiale")
+
+# === Correction Mongo : timestamp manquant
+def fix_missing_timestamps():
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["articles_db"]
+    collection = db["articles"]
+    now = datetime.utcnow().isoformat()
+    result = collection.update_many(
+        {"timestamp": {"$exists": False}},
+        {"$set": {"timestamp": now}}
+    )
+    print(f"[✔] {result.modified_count} articles corrigés (timestamp ajouté).")
+
+fix_missing_timestamps()
+
+# === Bouton Scraping
+if st.button("Lancer le scraping"):
+    try:
+        run_country_specific_scraping()
+        run_general_theme_scraping()
+        st.success("✅ Scraping terminé ! Rechargez les données.")
+    except Exception as e:
+        st.error(f"Erreur de scraping : {e}")
+
+# === Chargement des données
+articles = get_cleaned_articles()
+if not articles:
+    st.error("Aucun article trouvé.")
+    st.stop()
+
+df_raw = pd.DataFrame(articles)
+st.write("🧪 Colonnes disponibles :", df_raw.columns.tolist())
+
+# --- Nettoyage & Transformation ---
+# Chargement des articles avec émotions
+documents = list(collection.find({"emotion": {"$exists": True}}))
+if not documents:
+    st.warning("Aucun document trouvé avec des émotions.")
+    st.stop()
+
+data = []
+for doc in documents:
+    emotion = doc.get("emotion")
+    country = doc.get("pays") or doc.get("lang") or "Inconnu"  # 👈 Cette ligne doit être ici
+    theme = doc.get("tags", "Autre")
+    date_str = doc.get("publication_date")
+    try:
+        year = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ").year
+    except:
+        year = None
+
+    if emotion and theme:
+        data.append({
+            "theme": theme,
+            "country": country,
+            "emotion": emotion,
+            "year": year,
+            "count": 1
+        })
+ 
+
+# === Normalisation des colonnes
+if "pays" in df_raw.columns:
+    df_raw["country"] = df_raw["pays"]
+else:
+    df_raw["country"] = "Inconnu"
+
+if "theme" not in df_raw.columns:
+    df_raw["theme"] = "Inconnu"
+else:
+    df_raw["theme"] = df_raw["theme"].fillna("Inconnu")
+
+# === Timestamp
+if "timestamp" not in df_raw.columns:
+    st.warning("⛔ Colonne 'timestamp' absente. Création avec date actuelle.")
+    df_raw["timestamp"] = datetime.utcnow().isoformat()
+
+df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], errors="coerce")
+df_raw["year"] = df_raw["timestamp"].dt.year
+df_raw["date"] = df_raw["timestamp"].dt.date.astype(str)
+
+# === Filtres disponibles
+available_countries = df_raw["country"].dropna().unique()
+available_themes = df_raw["theme"].dropna().unique()
+available_years = sorted(df_raw["year"].dropna().unique())
+
+if len(available_years) == 0:
+    st.error("⛔ Aucun article avec année valide.")
+    st.stop()
+
+# === Sélections utilisateur
+selected_countries = st.sidebar.multiselect("🌐 Pays à comparer", available_countries)
+selected_theme = st.sidebar.selectbox("🎯 Thème à analyser", available_themes)
+
+# === Plage d'années à comparer
+if len(available_years) > 1:
+    year_range = st.sidebar.slider(
+        "⏳ Plage d'années (max 2)",
+        min_value=int(min(available_years)),
+        max_value=int(max(available_years)),
+        value=(int(min(available_years)), int(max(available_years))),
+        step=1
+    )
+    # === Curseur pour se déplacer entre les deux années sélectionnées
+    selected_year = st.sidebar.slider(
+        "📅 Choisissez une année à afficher",
+        min_value=year_range[0],
+        max_value=year_range[1],
+        value=year_range[0],
+        step=1
+    )
+else:
+    year_range = (int(available_years[0]), int(available_years[0]))
+    selected_year = int(available_years[0])
+    st.sidebar.info(f"📅 Une seule année disponible : {available_years[0]}")
+
+# Vérification
+if year_range[1] - year_range[0] > 1:
+    st.warning("🚨 Veuillez sélectionner au plus deux années consécutives.")
+    st.stop()
+
+st.sidebar.markdown(f"📊 Affichage des données pour l'année **{selected_year}**")
+
+# === Filtrage des données
+df_filtered = df_raw[
+    (df_raw["year"] == selected_year) &
+    (df_raw["theme"] == selected_theme) &
+    (df_raw["country"].isin(selected_countries))
+]
+
+# === Affichage graphique
+if not df_filtered.empty:
+    fig = contour_plot(df_filtered, selected_countries, selected_theme, (selected_year, selected_year))
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning(f"Aucune donnée disponible pour {selected_theme} en {selected_year}.")
+
+# === Chargement du modèle (optionnel ici)
+emotion_pipeline = load_emotion_model()
+
+# (Bloc supprimé car il dupliquait les widgets de sélection et la logique de filtrage)
+
+# === Analyse locale (optionnelle ou pré-calculée)
+def analyze_emotions(df, emotion_analyzer):
+    df = df.copy()
+
+    if "emotion" not in df.columns:
+        if "content" in df.columns:
+            df["emotion"] = df["content"].apply(
+                lambda text: emotion_analyzer(text[:512])[0]["label"] if isinstance(text, str) and text else "unknown"
+            )
+        else:
+            df["emotion"] = "unknown"
+
+    df["nb_articles"] = 1
+    return df
+
+if "country" not in df_raw.columns:
+    st.error("La colonne 'country' est manquante dans les données.")
+    st.stop()
+
+# === Visualisations ===
+def bubble_map(df, selected_theme, year):
+    if df.empty:
+        raise ValueError("Les données pour la carte à bulles sont vides.")
+    filtered = df[(df["theme"] == selected_theme) & (df["year"] == year)]
+    
+    if filtered.empty:
+        raise ValueError(f"Aucune donnée trouvée pour le thème '{selected_theme}' en {year}.")
+    print(filtered.columns)
+    
+    # Drop rows with missing country or emotion before grouping
+    print("Colonnes disponibles dans filtered :", filtered.columns)
+
+    filtered = filtered.dropna(subset=["country", "emotion"])
+    # Remove rows with unrecognized or generic country names
+    filtered = filtered[filtered["country"].apply(lambda x: isinstance(x, str) and x.lower() not in ["inconnu", "unknown", ""])]
+    emotion_counts = filtered.groupby(["country", "emotion"]).size().reset_index(name="count")
+    emotion_summary = emotion_counts.groupby("country")["count"].sum().reset_index()
+
+    fig = px.scatter_geo(
+        emotion_summary,
+        locations="country",
+        locationmode="country names",
+        size="count",
+        projection="natural earth",
+        title=f"Distribution des émotions pour le thème '{selected_theme}' en {year}"
+    )
+    return fig
+
+def contour_plot(df, countries, selected_theme, year_range):
+    filtered = df[(df["theme"] == selected_theme) &
+                  (df["country"].isin(countries)) &
+                  (df["year"].between(*year_range))]
+    
+    grouped = filtered.groupby(["year", "country", "emotion"]).size().reset_index(name="count")
+    pivot = grouped.pivot_table(index="year", columns=["country", "emotion"], values="count", fill_value=0)
+    
+    z = pivot.values
+    x = pivot.index.values
+    y = [f"{col[0]}-{col[1]}" for col in pivot.columns]
+
+    fig = go.Figure(data=go.Contour(z=z, x=x, y=y, colorscale="Viridis", contours_coloring='heatmap'))
+    fig.update_layout(title="Évolution des émotions par pays et par année",
+                      xaxis_title="Année", yaxis_title="Pays-Émotion")
+    return fig
+
+# === MAIN ===
+raw_data = get_cleaned_articles()  # Cette fonction doit renvoyer une liste de dicts
+emotion_pipeline = load_emotion_model()
+
+# Assure-toi que les données sont bien dans un DataFrame
+if isinstance(raw_data, list):
+    df_raw = pd.DataFrame(raw_data)
+else:
+    raise ValueError("get_cleaned_articles() doit renvoyer une liste de dictionnaires.")
+
+# === Gestion des années pour le slider
+if "timestamp" in df_raw.columns:
+    df_raw["year"] = pd.to_datetime(df_raw["timestamp"], errors="coerce").dt.year
+else:
+    st.error("La colonne 'timestamp' est manquante dans les données.")
+    st.stop()
+
+years = sorted(df_raw["year"].dropna().unique())
+
+if len(years) == 0:
+    st.error("⛔ Aucun article avec une année valide.")
+    st.stop()
+
+if len(years) > 1:
+    year = st.sidebar.selectbox("🗓️ Année pour la carte à bulles", years)
+    year_range = st.sidebar.slider(
+        "⏳ Plage d'années pour comparaison",
+        int(min(years)),
+        int(max(years)),
+        (int(min(years)), int(max(years)))
+    )
+else:
+    year = years[0]
+    year_range = (year, year)
+    st.sidebar.info(f"📅 Une seule année disponible : {year}")
+ 
+# === Vérification du thème ===
+if "theme" in df_raw.columns and not df_raw["theme"].isna().all():
+    theme = st.sidebar.selectbox("🎯 Choisissez un thème", sorted(df_raw["theme"].dropna().unique()))
+else:
+    st.error("Aucun thème disponible dans les données.")
+    st.stop()
+
+
+

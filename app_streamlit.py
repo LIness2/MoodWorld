@@ -1,6 +1,12 @@
 import streamlit as st
 import pandas as pd
-from final2 import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
+from code_final import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
+from pymongo import MongoClient
+
+# Connexion MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["articles_db"]
+collection = db["articles"]
 
 def main():
     st.title("Carte des émotions")
@@ -49,3 +55,62 @@ def main():
 
 if __name__ == "__main__":
     main()
+# Liste complète des émotions
+emotions = ["joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral"]
+
+# Récupération des pays
+pays_list = collection.distinct("pays")
+
+st.title("Comparaison des émotions par pays et année")
+
+selected_countries = st.multiselect(
+    "Choisir 3 pays :", pays_list, default=pays_list[:3]
+)
+# Vérification
+if len(selected_countries) != 3:
+    st.warning("Veuillez sélectionner exactement 3 pays.")
+else:
+    data = []
+
+    for pays in selected_countries:
+        articles = collection.find({
+            "tags": selected_theme,
+            "pays": pays,
+            "publication_date": {"$regex": f"^{selected_year}"}
+        })
+
+        counts = {e: 0 for e in emotions}
+        for article in articles:
+            emotion = article.get("emotion")
+            if emotion in emotions:
+                counts[emotion] += 1
+
+        for emotion in emotions:
+            data.append({
+                "Pays": pays,
+                "Emotion": emotion,
+                "Nombre d'articles": counts[emotion]
+            })
+
+    df = pd.DataFrame(data)
+
+    fig = px.bar(
+        df,
+        x="Pays",
+        y="Nombre d'articles",
+        color="Emotion",
+        category_orders={"Emotion": emotions},
+        barmode="stack",
+        title=f"Émotions par pays – Thème '{selected_theme}' ({selected_year})",
+        color_discrete_map={
+            "joy": "#E1BB60",
+            "sadness": "#6998C5",
+            "anger": "#D84644",
+            "fear": "#C49DD9",
+            "surprise": "#E09F6D",
+            "disgust": "#3B9A3B",
+             "neutral": "#CFCFCF"
+        }
+    )
+
+    st.plotly_chart(fig, use_container_width=True)

@@ -1,15 +1,14 @@
 import streamlit as st
 import pandas as pd
-from code_final import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
+from final2 import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
 from pymongo import MongoClient
 
 # Connexion MongoDB
 client = MongoClient("mongodb://localhost:27017/")
 db = client["articles_db"]
 collection = db["articles"]
-
 def main():
-    st.title("WorldMood – Analyse et visualisation des émotions")
+    st.title("Carte des émotions")
 
     # Charger les articles depuis MongoDB
     articles = get_cleaned_articles()
@@ -114,3 +113,4 @@ else:
     )
 
     st.plotly_chart(fig, use_container_width=True)
+

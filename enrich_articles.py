@@ -11,7 +11,7 @@ NEWSAPI_KEY = "5cc959f32-de5449ea982ea306e99cd0d"
 # Connexion MongoDB
 client = MongoClient("mongodb://localhost:27017")
 db = client["articles_db"]
-collection = db["articles_news"]
+collection = db["articles"]
 
 
 # Liste des pays avec mot-clé et langue
@@ -53,32 +53,32 @@ def detect_theme(text):
     return "autre"
 
 # Fonction de scraping Bing News pour un pays donné
+
 def scrape_bing_news(country_name, query, language):
-    # URL de recherche Bing News avec filtre de langue
-    # &setLang=<lang_code> fonctionne pour certains moteurs
     search_url = f"https://www.bing.com/news/search?q={query}&qft=lang:{language}&form=QBNH"
+    try:
+        response = requests.get(search_url, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Erreur HTTP pour {country_name}: {e}")
+        return
 
-    response = requests.get(search_url, headers=HEADERS)
     soup = BeautifulSoup(response.content, "html.parser")
-
-    # Recherche des articles
     news_items = soup.find_all("a", {"class": "title"}, href=True)
 
     for link in news_items:
         title = link.get_text(strip=True)
         href = link["href"]
 
-        if not title or len(title) < 20:
+        if not title or len(title) < 20 or collection.find_one({"link": href}):
             continue
-
         # Éviter doublons
         if collection.find_one({"link": href}):
             continue
 
-        # Détection langue et traduction si nécessaire
         try:
             detected_lang = detect(title)
-        except:
+        except Exception:
             detected_lang = language
 
         if detected_lang != "en":
@@ -91,7 +91,6 @@ def scrape_bing_news(country_name, query, language):
 
         theme = detect_theme(title_en)
 
-        # Enregistrement MongoDB
         doc = {
             "title_original": title,
             "title_en": title_en,
@@ -104,9 +103,10 @@ def scrape_bing_news(country_name, query, language):
         collection.insert_one(doc)
         print(f"[{country_name}] Ajouté: {title_en} - {theme}")
 
-    time.sleep(2)  # pause pour éviter surcharge
-
+    time.sleep(2)
 # Boucle principale
 for country_name, info in countries.items():
     print(f"Scraping articles pour {country_name}...")
     scrape_bing_news(country_name, info["query"], info["language"])
+
+

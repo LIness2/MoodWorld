@@ -5,14 +5,14 @@ from transformers import pipeline
 import os
 
 # === Connexion MongoDB ===
-def connect_to_mongo(uri: str = None, db_name: str = "worldmood", collection_name: str = "articles"):
+def connect_to_mongo(uri: str = None, db_name: str = "worldmood", articles: str = "articles"):
     """
     Connexion à la base MongoDB.
     """
     uri = uri or os.getenv("MONGO_URI", "mongodb://localhost:27017")
     client = MongoClient(uri)
-    db = client[db_name]
-    return db[collection_name]
+    db = client["articles_db"]
+    return db["articles"]
 
 # === Récupérer les articles nettoyés depuis MongoDB ===
 def get_cleaned_articles():
@@ -81,3 +81,4 @@ def analyze_emotions(df: pd.DataFrame, emotion_analyzer) -> pd.DataFrame:
     df["nb_articles"] = 1
 
     return df
+

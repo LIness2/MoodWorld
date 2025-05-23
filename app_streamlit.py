@@ -7,7 +7,7 @@ from pymongo import MongoClient
 mongo_url = st.secrets["mongodb"]["uri"]
 
 # Connexion MongoDB
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient(mongo_url)
 db = client["articles_db"]
 collection = db["articles"]
 

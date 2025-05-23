@@ -4,6 +4,8 @@ Vous pourrez lancer le site !
 
 Pour run l'application avec comme fichier principal:app_streamlit.py et modules: code_final.py, executez avec streamlit run app_streamlit.py
 
+!!! Pour voir beaucoup d'émotions apparaitre, sélectionner les pays France, Chine, Germany par exemple, et les combinaisons : politique-anger, autre-fear, ou encore autre et toutes les émotions
+
 
 Nous avons essayé de lié MongoDB Atlas(en créant une URL puis en la connectant à MongoDB compass où se trouve toute la collection d'articles filtrés), à StreamlitCloud, pour que vous puissiez acceder à notre site sans toutes ces manip et en cliquant simplement sur le lien mais sans succès... Dans GitHub, nous avons créer un "secret.toml " où se trouve l'URL de MongoDB Atlas(et nous nous sommes pourtant assurées que toutes les IP avaient accès au cluster), afin que streamlit puisse y avoir accès, et modifié app_streamlit.py avec :
 mongo_url =st.secrets["mongodb"]["uri"]

@@ -1,0 +1,10 @@
+streamlit
+plotly
+pymongo
+nltk
+beautifulsoup4
+requests
+langdetect
+transformers
+torch
+pandas

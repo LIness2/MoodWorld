@@ -8,3 +8,6 @@ langdetect
 transformers
 torch
 pandas
+matplotlib
+
+

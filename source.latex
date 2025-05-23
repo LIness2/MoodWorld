@@ -1,0 +1,280 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage[a4paper]{geometry}
+
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{eso-pic}
+\usepackage{float} % pour les figures [H]
+
+\makeatletter
+% ---------- MÉTADONNÉES ----------
+% ---------- MÉTADONNÉES ----------
+\newcommand{\datedebut}[1]{\def\@datedebut{#1}}
+\newcommand{\datefin}[1]{\def\@datefin{#1}}
+\def\@datedebut{\today}
+\def\@datefin{\today}
+
+% ---------- FOND ----------
+\newcommand\BackgroundPic{%
+  \put(0,0){%
+    \parbox[b][\paperheight]{\paperwidth}{%
+      \includegraphics[height=.45\paperheight]{Bordure.png}%
+      \vfill
+    }%
+  }%
+}
+
+% -
+% ---------- PAGE DE GARDE ----------
+\newcommand{\pagedegarde}{%
+  \newgeometry{top=2.5cm,bottom=1cm,left=2cm,right=1cm}%
+  \AddToShipoutPicture*{\BackgroundPic}
+  \begin{titlepage}
+    \centering
+    \vspace*{-1.8cm}
+    \includegraphics[width=.6\textwidth]{logo_Paris_Nanterre_couleur_RVB.png}
+    \vspace{1.5cm}
+
+    {\Large Licence MIASHS première année\par}
+    \vspace{1cm}
+
+    {\huge\bfseries Rapport de projet informatique\par}
+    \vspace{1cm}
+
+    {\Huge\color{blue}\bfseries Moodworld : Analyse Émotionnelle de l’Actualité\par}
+    \vspace{0.8cm}
+
+    {\large\bfseries Projet réalisé de mars 2025 à mai 2025\par}
+    \vspace{0.8cm}
+    
+ \noindent \textbf{Dépôt GitHub :} \href{https://github.com/LIness2/MoodWorld.git}
+\\
+    {\large\bfseries Membres du groupe\par}
+    \vspace{0.5cm}
+
+ \begin{center}
+    \begin{minipage}[t]{0.3\textwidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{IMG_1592.jpeg}
+        \vspace{0.3cm}
+        
+        \textbf{Omaima Mahjoub} \\
+        Numéro étudiant : 44004229
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.3\textwidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{}
+\begin{figure}
+            \centering
+            \includegraphics[width=0.9\linewidth]{433751d2-58ff-448a-9970-728e90613207.JPG}
+            \vspace{0.3cm}
+            \label{fig:enter-label}
+        \end{figure}
+                \vspace{0.3cm}
+        
+        \textbf{Ines Laouer} \\
+        Numéro étudiant : 43012489
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.3\textwidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{07dcd5ef-cb02-4ea1-a857-5d362650d790.JPG}
+        \vspace{0.3cm}
+        
+        \textbf{Niakale Diawara} \\
+        Numéro étudiant : 44017578
+    \end{minipage}
+    \end{center}
+
+    \vfill
+  \end{titlepage}
+  \restoregeometry
+}
+        
+
+
+
+
+\begin{document}
+
+\pagedegarde
+
+\begin{center}
+{\Huge \textbf{Sommaire}}\\[1.5cm]
+
+    {\Large
+    \begin{tabular}{l}
+    1 Introduction \\
+    \hspace{1cm}1.1 Les ambitions du projet \\
+    \hspace{1cm}1.2 Méthodologie employée \\
+    \hspace{1cm}1.3 Présentation des résultats \\
+    \\
+    2 Plan et réalisation du projet \\
+    \hspace{1cm}2.1 Les étapes clés de la mise en œuvre \\
+    \hspace{1cm}2.2 Les obstacles rencontrés \\
+    \hspace{1cm}2.3 La place de L’IA dans ce projet \\
+    \\
+    3 Conclusion \\
+    \hspace{1cm}3.1 Récaputilisation des apprentissages et réussites \\
+    \hspace{1cm}3.2 Améliorations futures \\
+    \\
+    4 Annexe \\
+    \hspace{1cm}4.1 Sources \\
+    \hspace{1cm}4.2 IA \\
+    \hspace{1cm}4.3 Captures d'écran de l'application\\
+
+    
+    \end{tabular}
+    }
+\end{center}
+
+\vspace*{\fill}  % Remplit verticalement après le texte
+
+
+\newpage
+
+\section{Introduction}
+\subsection{Les ambitions du projet}
+
+
+\indent MoodWorld propose une lecture émotionnelle de l'actualité mondiale. En analysant des articles de presse issus de plusieurs pays et formulés en différentes langues, ce projet cartographie les émotions ressenties associées à divers thèmes(politique, écologie, climat, etc.). L'objectif est double: au premier abord il s'agit d'offrir une visualisation interactive permettant d'explorer les tendances émotionnelles par pays et sujets. Mais au delà de cette démarche, il favorise une prise de recul face à l'actualité et met en lumière les ressentis sous-jacents aux discours médiatiques. \\
+
+L'analyses des émotions présentes dans l'actualité mondiale s'effectue à l'aide des traitements automatiques de langages naturels(NLP). En s’appuyant sur un Large Language Model (LLM), notre application classifie des articles de presse selon les émotions dominantes qu'ils véhiculent. 
+Les émotions sont ensuite associées à une couleur(par exemple:jaune pour la joie, rouge pour la colère...). \\
+
+Enfin, les résultats peuvent être visualisés sous forme de cartographie interactive et de graphique qui permettent une lecture à la fois émotionnelle et géographique de l'actualité mondiale.
+
+
+\subsection{Méthodologie employée}
+Pour définir l'idée principale du projet, nous avons réflechi à des thématiques qui nous parlaient le plus, et nous avons pensé à l'actualité. Nous avons imaginé une plateforme interative capable de traduire l'état émotionnel d'un pays en fonction d'un thème, et de pouvoir les comparer entre eux. Nous avons donc exploré les différentes possibilités techniques à disposition et imaginé un plan d'action, et nous nous sommes réparti les taches pour chaque étape.\\
+
+Pour réaliser ce projet, nous avons utilsé des environnements comme PyCharm, Visual Studio Code, et GitHub. Ce qui nous a permis d'intéragir facilement et assurer un suivi précis de nos contributions. Entre autre, nous nous sommes vues régulièrement pour travailler ensemble, résoudre les blocages et nous entraider.  Un groupe Whatsapp a également été un outil indispensable pour cette stratégie.
+
+
+
+
+\subsection{Présentation des résultats}
+Finalement, après ces 3 mois de travail, l'application web est opérationnelle et nous avons à disposition : 
+
+-Un graphique comparatif qui permet de visualiser et comparer TOUTES les émotions entre 3 pays.
+
+-Des séléctions de thèmes, pays, et émotions.
+
+- Une carte du monde interactive que l'on peut pivoter, et sur laquelle apparait des bulles de couleurs correspondant à l'émotion et affiche leurs données en pourcentage. La taille des bulles dépend du pourcentage de l'émotion sélectionnées et du nombre d'articles filtrés.
+
+- L'année 2025, pour des articles actualisés. 
+
+-Pas visible sur l'application mais plus de 700 articles sont filtrés.
+
+\section{Plan et réalisation du Projet }
+\subsection{ Les étapes clés de la mise en oeuvre}
+  La première étapes consistait à la collecte et stockage des données :  Il fallait récuperer des articles d'actualité issu de différentes sources de plusieurs pays et en différentes langues. Pour cela, nous avons d'abord procedé au "Sraping Web" ( extraction manuelle des articles), grace à l'outil scrapy. Puis nous avons  utlisé l'API de NewsAPI.org  qui permet d’obtenir des flux RSS et des métadonnées provenant de plusieurs journaux en ligne. Nous avons obtenu une clé NewAPI et nous l'avons intégrer au code. 
+Nous avons opté pour une base MongoDB compass Atlas, bien adaptée au format JSON natif des articles. À ce stade, les documents étaient enregistrés dans une collection articles, au sein d’une base articles\_db. \\
+
+La deuxième étape visait à détécter les émotions. Nous avons utilisé un modèle de la bibliothèque HuggingFace Transformers, et les articles rédigés en d'autres langues ont du être traduits vers l'anglais grace à la bibliothèque DeepTranslator. Les contenus ont été analysés pour en extraire une émotion parmi les suivantes : joy, sadness, anger, fear, surprise, disgust, neutral. Le champ émotion a ensuite été ajouté à chaque article dans la base de données.
+En parallèle, chaque article a également été classé selon un ou plusieurs thèmes.. On a eu à concevoir un dictionnaire pour les regrouper. 
+Les articles possèdent un champ thèmes sous forme de liste. Enfin, il fallait comparer les émotions par pays. Nous avons effectué une agrégation des émotions pour chaque pays sélectionné.\\
+
+Pour le premier graphique qui est une carte de type Bubble Map, nous nous sommes inspirées d’un exemple trouvé sur le site de Plotly \\ (https://plotly.com/python/bubble-maps/) et on l’a modifié et adapté à notre code. L’utilisateur doit sélectionner un thème et une émotion qui se trouve dans la liste, puis trois pays pour que la carte affiche des bulles positionnées au centre de chaque pays. La taille des bulles indiquera le nombre d’articles associés, tandis que leur couleur représentera l’émotion. \\
+
+ 
+
+Pour créer le deuxième graphique qui permet de comparer des émotions par pays, on s'est inspirées d’un graphique vu  sur le meme site (https://plotly.com/python/bar-charts/). Nous l'avons modifié en demandant à Chat GPT de combiner ce graphique avec nos modifications. Après plusieurs essais, on commence à voir les résultats souhaités. Mais pour cela on a dû se connecter aux données MongoDB stockées.  A partir de ces données, l’utilisateur peux choisir un thème et trois pays qui se trouvent dans la liste.  Puis pour chaque pays correspondant au graphique, le code va récolter tous les articles qui y correspondent et les associer  à des émotions. On verra sur le graphique en abscisse les noms des pays et en ordonnée le nombre d’articles. Chaque barre du graphique représente un pays, et est divisée en segments colorés selon les émotions.\\
+
+L’ensemble des résultats a été intégré dans une application web développée avec Streamlit et les visualisations sont réalisées à l'aide de la bibliothèque Ploty.
+
+\subsection{Les obstacles rencontrés}
+
+Au départ, la récupération d’articles via \texttt{Scrapy} était limitée, notamment à cause des restrictions de sites. Nous avons donc intégré \texttt{NewAPI}. Les articles récupérés par \texttt{Scrapy} et \texttt{NewsAPI} sont stockés ensemble dans une base \texttt{MongoDB}, ce qui nous permet maintenant de traiter automatiquement des centaines d’articles via un script Python connecté à cette base.\\
+
+Les frameworks \texttt{Dash} et \texttt{Streamlit} ne fonctionnaient pas ensemble dans un même script. Ce qui a créé des erreurs, par exemple des appels impossibles à \verb|st.select|. Pour résoudre ce problème, nous avons séparé les codes en \texttt{app\_streamlit.py} qui constitue l’interface utilisateur finale, 100\% basée sur \texttt{Streamlit}, et \texttt{code\_final.py} qui contient uniquement les fonctions de traitement et de visualisation (sans dépendance à un framework). Grâce à ça, la carte \texttt{bubble.map} s'affichait correctement !\\
+
+Mais un autre problème est survenu : l’affichage des émotions par pays sur la carte dépendait de la possibilité de sélectionner ces pays. Or, cette sélection était compliquée à mettre en place, car elle reposait sur une liste (\verb|plot_liste|) directement construite à partir des articles disponibles. Le champ indiquant le pays variait d’un article à l’autre : parfois nommé \verb|pays|, parfois \verb|country|, ce qui perturbait la génération de la liste. Nous avons donc uniformisé les articles à partir d'un champ unique et mis à jour la base \texttt{MongoDB}.\\
+
+Concernant l’attribution des thèmes aux article: malgré la mise en place d'un système de tri automatique pour classer les articles par thèmes, beaucoup ont été catégorisés comme "autre". Faute d’informations assez précises ou claires pour être attribuer à un thème automatiquement. Cela a limité le nombre de thèmes présents sur le site, expliquant pourquoi seuls certains apparaissent.\\
+
+D'autres articles ont été classés comme "neutre". Ce qui s'explique premièrement par la manière neutre dont les articles d’actualité sont rédigés, mais également par les limites du modèle d’analyse émotionnelle utilisé. Ce déséquilibre a eu un impact sur la visualisation du deuxième graphique et sur la comparaison des émotions par pays. 
+
+\subsection{La place de L'IA dans ce projet}
+
+L’intelligence artificielle a joué un rôle important dans l'aboutissement de notre projet. On l’utilisait régulièrement lorsqu’on rencontrait des problèmes dans la création de code ou même lors de leurs exécutions où il fallait installer de nouvelles bibliothèques. L'IA a joué le rôle d'assistant de développement, de conseillé, d’orientation et même de formation. Nous avons pu  structurer notre démarche, faire les meilleurs choix possibles pour écrire du code clair et robuste, et comprendre ce que nous faisions. Nous nous sommes servi de  ChatGPT pour comprendre l’origine des bugs ou ralentissements. Nous avons établi des solutions concrètes comme l’optimisation du code, la gestion des erreurs et les astuces de debug.\\
+
+Par exemple pour la traduction automatique des articles, on a utilisé l’outil Deepl qui utilise des modèles d’intelligence artificielle avancés. BERT (Bidirectional Encoder Representations from Transformers) et affiné (fine-tuné) a été utilisé pour la classification d’émotions dans des textes journalistiques. Ce modèle est une IA capable de comprendre les subtilités linguistiques et les contextes émotionnels complexes retrouvés dans les articles.  Chat GPT et Mistral ont également perfectionné la visualisation de nos graphiques.//
+
+\end{itemize}
+
+
+
+\section{conclusion}
+\subsection{Récaputilisation des apprentissages et réussites}
+ Ainsi, ce projet a été une exprerience enrichissante et formatrice pour nous, en utilisant les différents langages HTML, python et CSS. Et les différents  frameworks pour la création de l'application web.
+ Nous avons mieux compris la réalité technique et méthodologiques d'un projet de données : Structurer proprement son code, de tester continuellement et surtout de s’adapter aux données réelles, souvent incomplètes ou peu claires.\\
+
+Nous avons aussi exploré et appris à manipuler des outils professionnels comme MongoDB, Streamlit, Plotly ...  Au fil des semaines, nous avons non seulement développé des aptitudes en programmation et visualisation, mais aussi affiné notre capacité à trailler en équipe, à nous répartir les tâches et à documenter efficacement notre travail.
+
+
+
+\subsection{Améliorations futures}
+Nous n'avons pas pu accéder aux articles précédant l'année 2025, ce qui limite notre analyse historique : Intégrer des données plus anciennes permettrait d'avoir une vison temporelle plus large (en utilisant par exemple des requêtes MongoDB avec des conditions sur les dates).  Ensuite, l’attribution des émotions se fait actuellement au niveau de l’article entier, sans nuancer  certains passages. Il serait pertinent d’ajouter un ajustement selon le contexte(segmenter le texte (par paragraphe ou phrase) ?) et analyser chaque segment pour une détection plus précise. Et des filtres pour choisir des périodes, comme un mois ou un trimestre.  Enfin, pour faciliter l’accès et le partage, il serait utile de créer une version en ligne avec une base de données MongoDB accessible à distance, afin de rendre l’utilisation plus simple et collaborative. 
+
+
+
+
+\section{Annexe}
+\subsection{Sources}
+https://plotly.com/python/bubble-maps/
+
+https://youtu.be/dwrcqcynODg?si=m48P4uLdUBfGa-Us
+
+https://plotly.com/python/bar-charts/
+
+\subsection{IA}
+Nous avons notamment utilisé des
+modèles de langage comme ChatGPT, Mistral, Gemini, deepseek, un modèle pré-entraîné de NLP et Google Translator (deep\_translator) 
+
+
+
+\subsection{Captures d'écran de l'application}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width= 1.0\textwidth]{WhatsApp Image 2025-05-23 à 15.04.06_9fd16698.jpg}
+    \caption{Capture d'écran du graphique 1}
+    \label{fig:moodworld}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{} 
+\begin{figure}
+        \centering
+        \includegraphics[width=0.85\linewidth]{WhatsApp Image 2025-05-23 à 15.06.52_10541359.jpg}
+        \caption{Capture d'écran du graphique 2}
+        \label{fig:enter-label}
+    \end{figure}
+      
+\end{figure}
+
+\newpage
+\section*{Remerciements}
+
+Nous souhaitons exprimer notre reconnaissance pour le travail d’équipe que nous avons mené tout au long de ce projet.
+
+Un grand merci à nous même, pour notre implication, notre sérieux et notre bonne humeur. Chacune d'entre nous a contribué de manière essentielle à la réussite de ce travail, que ce soit dans la collecte des données, le traitement des articles ou la mise en place des visualisations.
+
+Notre collaboration a été non seulement efficace, mais aussi agréable, et a permis de surmonter ensemble les différentes difficultés rencontrées.
+
+Enfin, nous sommes fières du chemin parcouru et de ce que nous avons pu apprendre en équipe à travers ce projet.
+
+\vspace{1cm}
+\begin{flushright}
+    \textit{Omaima Mahjoub,  Ines Laouer , Niakale Diawara }
+\end{flushright}
+
+
+\end{document}
+
+

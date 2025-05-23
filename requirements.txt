@@ -10,11 +10,3 @@ torch
 pandas
 matplotlib
 datasets
-requests
-datetime
-geocoder
-deep_translator
-warnings
-re
-json
-bson.json_util

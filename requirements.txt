@@ -9,5 +9,6 @@ transformers
 torch
 pandas
 matplotlib
+datasets
 
 

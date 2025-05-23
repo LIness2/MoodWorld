@@ -4,6 +4,8 @@ import plotly.express as px
 from code_final import get_cleaned_articles, load_emotion_model, analyze_emotions, bubble_map
 from pymongo import MongoClient
 
+mongo_url = st.secrets["mongodb"]["uri"]
+
 # Connexion MongoDB
 client = MongoClient("mongodb://localhost:27017/")
 db = client["articles_db"]
